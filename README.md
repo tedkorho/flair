@@ -4,11 +4,13 @@ Teo Korhonen, 2020-2021.
 
 Detects flares from a collection of lightcurves stored in some directory structure, and estimates their energies based on the star's luminosity and a black-body model of the flare radiation in the TESS band.
 
+This requires Python 3 with fresh-ish versions of `astropy.io` (for opening `.fits` files), `sklearn` (for detrending lightcurves), `scipy` (for numerical integration), and `numpy` (for other numerical work).
+
 ### INSTRUCTIONS
 
 1) Store .fits files containing the lightcurves in any directory structure in the `input` directory; any structure works, as long as the lightcurves are contained in files ending with `_lc.fits`. These need to follow the TESS Science Data Products Description Document specifications\*.
 
-2) Edit the `src/params.dat` file to match the specifications of the star and/or the flare detection.
+2) Edit the `src/params.dat` file to match the specifications of the star and/or the flare detection. If you have correct lightcurves in your directory, you can find the relevant stellar parameters with the `starinfo.sh` script.
 
 3) Detect flare candidates in each lightcurve by running the `detect.sh` script in the root folder. By default, this also produces plots of each lightcurve. The results for each lightcurve are stored in human-readable (and editable) format in the `out` directory.
 
