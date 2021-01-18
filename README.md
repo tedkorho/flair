@@ -6,7 +6,7 @@ Detects flares from a collection of lightcurves stored in some directory structu
 
 ### INSTRUCTIONS
 
-1) Store .fits files containing the lightcurves in any directory structure in. These need to follow the TESS Science Data Products Description Document specifications\*.
+1) Store .fits files containing the lightcurves in any directory structure in the `input` directory; any structure works, as long as the lightcurves are contained in files ending with `_lc.fits`. These need to follow the TESS Science Data Products Description Document specifications\*.
 
 2) Edit the `src/params.dat` file to match the specifications of the star and/or the flare detection.
 
