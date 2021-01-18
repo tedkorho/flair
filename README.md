@@ -24,7 +24,7 @@ This requires Python 3 with fresh-ish versions of `astropy.io` (for opening `.fi
 
 - As stated, stray NaNs can cause errors.
 
-- Rarely, for reasons beyond my humble mind, .fits files may break after this program opens them, causing repeat runs of the detection script to fail. Keep a backup on the ready.
+- For reasons beyond my humble mind, very rarely .fits files may break after this program opens them. This causes repeat runs of the detection script to fail. So keep backups of whatever files you run through the pipeline.
 
 ### FURTHER MODIFICATIONS
 
