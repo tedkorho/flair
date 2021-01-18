@@ -1,3 +1,5 @@
+![Sample lightcurve.](https://github.com/tedkorho/flair/blob/main/out/tess2020160202036-s0026-0000000471000657-0188-s_lc.png)
+
 # FLARE DETECTION TOOL
 
 Teo Korhonen, 2020-2021.
