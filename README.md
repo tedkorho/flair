@@ -1,10 +1,10 @@
-#FLARE DETECTION TOOL
+# FLARE DETECTION TOOL
 
 Teo Korhonen, 2020-2021.
 
 Detects flares from a collection of lightcurves stored in some directory structure, and estimates their energies based on the star's luminosity and a black-body model of the flare radiation in the TESS band.
 
-## INSTRUCTIONS
+### INSTRUCTIONS
 
 1) Store .fits files containing the lightcurves in any directory structure in. These need to follow the TESS Science Data Products Description Document specifications\*.
 
@@ -16,7 +16,7 @@ Detects flares from a collection of lightcurves stored in some directory structu
 
 5) Calculate the energies of these flare candidates by running the `energy.sh` script. This gathers all the flares in one output file.
 
-## POSSIBLE CAUSES OF ERROR
+### POSSIBLE CAUSES OF ERROR
 
 - Make sure the base filenames of each lightcurve are distinct - otherwise this may cause collisions in the output directory.
 
@@ -24,12 +24,12 @@ Detects flares from a collection of lightcurves stored in some directory structu
 
 - Rarely, for reasons beyond my humble mind, .fits files may break after this program opens them, causing repeat runs of the detection script to fail. Keep a backup on the ready.
 
-## FURTHER MODIFICATIONS
+### FURTHER MODIFICATIONS
 
 If the script is modified for some other satellite mission in the future, make sure to find its response curve somewhere - the energy estimation relies on this.
 
 Contact teo.korhonen@gmail.com if you have anything to ask.
 
-
+---
 
 \* See: a document of the same name in https://heasarc.gsfc.nasa.gov/docs/tess/documentation.html
