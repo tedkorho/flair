@@ -1,0 +1,12 @@
+2.6     # TIMESCALE OF THE FIT (use the star's approx. period if uncertain)
+0.4     # LENGTH OF 1 WINDOW (in units of timescale)
+9.0     # N. OF OVERLAPPING WINDOWS
+2.5     # PEAK SENS 1 (in standard deviations) -- for the first screening
+1.5     # ROLLOFF SENS 1 (in standard deviations)
+1       # MIN DURATION 1 (in cadence)
+4.0     # PEAK SENS 2 (in standard deviations) -- for the second screening
+1.0     # ROLLOFF SENS 2 (in standard deviations)
+3       # MIN DURATION 2 (in cadence)
+1.02298             # RADIUS OF THE STAR (R_sun)
+5798.0              # EFFECTIVE TEMPERATURE OF THE STAR (K)
+9000.0              # EFFECTIVE TEMPERATURE OF THE MODELLED FLARE
