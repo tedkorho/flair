@@ -48,7 +48,7 @@ def flare_spot(dt_flux, sigma):
 
     flare_times = np.zeros(len(dt_flux))
     len_flare = 0
-    df = [dt_flux[i + 1] - dt_flux[i] for i in range(len(dt_flux)-1)]
+    df = [dt_flux[i + 1] - dt_flux[i] for i in range(len(dt_flux) - 1)]
 
     # Tag the points where we spot the flare getting over 4 sigma;
     # two consecutive points will suffice:
@@ -100,11 +100,11 @@ def trend_lightcurve(time_raw, pdcflux_raw, windowsize, windowstep):
     sigma = np.std(lightcurve_detrended[~errs])
 
     for i in range(0, len(time_raw) - windowsize, windowstep):
-        
+
         flare_points[i : i + windowsize] = flare_spot(
             lightcurve_detrended[i : i + windowsize], sigma
         )
-    
+
     return lightcurve_trended, flare_points
 
 

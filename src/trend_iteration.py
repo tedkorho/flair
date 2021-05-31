@@ -41,7 +41,7 @@ def detrended_curve(time, time0, flux0):
     wt0 = [[(t - meant) / stdt] for t in time0]  # normalization for optimal SVM
     clf = svm.SVR(kernel="rbf", gamma="auto")
     clf.fit(wt0, (flux0 - meanf) / stdf)
-    wt = [[(t - meant) / stdt] for t in time] 
+    wt = [[(t - meant) / stdt] for t in time]
     flux_pred = clf.predict(wt)
 
     return flux_pred * stdf + meanf
@@ -95,18 +95,18 @@ def retrend_lightcurve(time_raw, pdcflux_raw, flares, windowsize, windowstep):
         windowflux_raw = deepcopy(flux_raw[i:iend])
         windowflares = deepcopy(flares[i:iend])
         windowtime_raw = time_raw[i:iend]
-		
+
         has_errs = np.isnan(windowflux_raw)
         flux0 = windowflux_raw[~has_errs]
         time0 = windowtime_raw[~has_errs]
         flare0 = windowflares[~has_errs]
-        
+
         flux1 = flux0[flare0 != 1.0]
         time1 = time0[flare0 != 1.0]
-		
-        if (len(time1) < 2):
+
+        if len(time1) < 2:
             continue
-		
+
         flux_trend = detrended_curve(time0, time1, flux1)
         windowflux_raw[~has_errs] = flux_trend
         lightcurve_trended[i : i + windowsize] += windowflux_raw
@@ -140,7 +140,7 @@ parser = ap.ArgumentParser(
     description="Re-trend a lightcurve from an output file by the trend_lightcurves script"
 )
 parser.add_argument("inputfile", metavar="if", type=str, help="Input file")
-#parser.add_argument("period", type=float, help="Period of the star")
+# parser.add_argument("period", type=float, help="Period of the star")
 parser.add_argument("--plot", help="Plot the lightcurve in file", type=str)
 parser.add_argument("--show", help="Show the lightcurve", action="store_true")
 parser.add_argument("--of", type=str, help="Output file for data")

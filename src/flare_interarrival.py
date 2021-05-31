@@ -26,9 +26,8 @@ def interflare_time(flux, flare_points, time):
             ctr = 0
         else:
             ctr += 1
-    
+
     return if_times
-           
 
 
 parser = ap.ArgumentParser(description="Gather flare interarrival times to stdout")

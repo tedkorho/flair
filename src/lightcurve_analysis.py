@@ -24,7 +24,7 @@ def detrended_curve(time, flux):
     with radial kernel functions; returns the trended curve.
     requires the line "from sklearn import svm"
     """
-    
+
     if len(time) == 0:
         return []
 
@@ -39,7 +39,7 @@ def detrended_curve(time, flux):
         clf.fit(wt, (flux - meanf) / stdf)
     except ValueError:
         return []
-        
+
     flux_pred = clf.predict(wt)
 
     return flux_pred * stdf + meanf
@@ -96,12 +96,13 @@ def trend_lightcurve(time_raw, pdcflux_raw, windowsize, windowstep):
         flux = windowflux_raw[~has_errs]
         time = windowtime_raw[~has_errs]
         flux_trend = detrended_curve(time, flux)
-        if (len(flux_trend) == 0): continue
-        
+        if len(flux_trend) == 0:
+            continue
+
         windowflux_raw[~has_errs] = flux_trend
         lightcurve_trended[i : i + windowsize] += windowflux_raw
         n_votes[i : i + windowsize] += 1
-    
+
     lightcurve_trended[lightcurve_trended == 0] = np.nan
     lightcurve_trended[n_votes != 0] /= n_votes[n_votes != 0]
     lightcurve_detrended = pdcflux_raw - lightcurve_trended
@@ -109,7 +110,7 @@ def trend_lightcurve(time_raw, pdcflux_raw, windowsize, windowstep):
     sigma = np.std(lightcurve_detrended[~errs])
 
     for i in range(0, len(time_raw) - windowsize, windowstep):
-        
+
         flare_points[i : i + windowsize] = flare_cand_spot(
             lightcurve_detrended[i : i + windowsize], sigma
         )
@@ -128,7 +129,7 @@ def lcplot(t, f, color=""):
 
 parser = ap.ArgumentParser(description="Trend a lightcurve from a TESS FITS file")
 parser.add_argument("inputfile", metavar="if", type=str, help="Input file")
-#parser.add_argument("period", type=float, help="Period of the star")
+# parser.add_argument("period", type=float, help="Period of the star")
 parser.add_argument("--plot", help="Plot the lightcurve in file", type=str)
 parser.add_argument("--show", help="Show the lightcurve", action="store_true")
 parser.add_argument("--of", type=str, help="Output file for data")

@@ -7,9 +7,9 @@ args = parser.parse_args()
 
 hdul = fits.open(args.inputfile)
 hdr0 = hdul[0].header
-T_STAR = hdr0['TEFF']
-R_STAR = hdr0['RADIUS']
-OBJECT = hdr0['OBJECT']
+T_STAR = hdr0["TEFF"]
+R_STAR = hdr0["RADIUS"]
+OBJECT = hdr0["OBJECT"]
 
 hdul.close()
 

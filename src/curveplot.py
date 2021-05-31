@@ -5,20 +5,22 @@ import matplotlib as mp
 import argparse as ap
 
 parser = ap.ArgumentParser()
-parser.add_argument("infile",type=str)
+parser.add_argument("infile", type=str)
 args = parser.parse_args()
 
-mp.style.use('seaborn-colorblind')
+mp.style.use("seaborn-colorblind")
 
-def lcplot(t,f,color="k",line=".",lw=1):
-    '''
+
+def lcplot(t, f, color="k", line=".", lw=1):
+    """
     Simple lightcurve plot function
-    '''
-    mp.rcParams['figure.figsize'] = [12, 6]
-    plt.plot(t,f,color+line,linewidth=lw, alpha = 0.1)
+    """
+    mp.rcParams["figure.figsize"] = [12, 6]
+    plt.plot(t, f, color + line, linewidth=lw, alpha=0.1)
     plt.xlabel("Timestamp (days)")
     plt.ylabel(r"SAP flux ($e^-/s$)")
-   
+
+
 hdul = fits.open(args.infile)
 lcdata = hdul[1].data
 hdul.close()
