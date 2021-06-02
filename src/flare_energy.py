@@ -38,6 +38,7 @@ def Model_exp(t, A, b, t0):
     return y
 
 
+
 def Model_flare(Fres, t, model):
 
     """
@@ -152,23 +153,7 @@ def L_flare(T_flare, A_f):
     return SIGMA_SB * T_flare ** 4.0 * A_f
 
 
-def E_flare(iamps, itimes, T_flare, LpS, LpF, R_star):
-
-    """
-    The energy of the flare. Takes in the amplitude,
-    and pre-calculated values for the luminosity of the 
-    star and the luminosity of the flare per unit area
-    """
-
-    nans = np.isnan(iamps)
-    amps = iamps[~nans]
-    times = itimes[~nans]
-    L_f = lambda amp: L_flare(T_flare, A_flare(amp, LpS, LpF, R_star))
-    integral = simps(L_f(amps), times)
-    return integral
-
-
-def E_flare_model(iamps, itimes, T_flare, LpS, LpF, R_star):
+def E_flare(iamps, itimes, T_flare, LpS, LpF, R_star, model="none"):
 
     """
     The energy of the flare, following a model. 
@@ -181,16 +166,21 @@ def E_flare_model(iamps, itimes, T_flare, LpS, LpF, R_star):
     amps = iamps[~nans]
     times = itimes[~nans]
     L_f = lambda amp: L_flare(T_flare, A_flare(amp, LpS, LpF, R_star))
-    Fmodel = Model_flare(amps, times, "exp")
-
+    
     # Fmodel is a tuple; [0] is the optimized parameters,
     # [1] is the flare.
+     
 
-    impulsiveness = Fmodel[0][0]
-    # print(Fmodel[1])
-    lumin = L_f(Fmodel[1])
-    # print(lumin)
-    energy = simps(L_f(Fmodel[1]), times)  # not good enough, do explicit integral
+    if (model == "exp"):
+        Fmodel = Model_flare(amps, times, "exp")
+        impulsiveness = Fmodel[0][0]
+        lumin = L_f(Fmodel[1])
+        energy = simps(L_f(Fmodel[1]), times)  # not good enough, do explicit integral
+    
+    else: 
+        impulsiveness = np.max(amps)
+        energy = simps(L_f(amps), times)
+    
     return (impulsiveness, energy)
 
 
@@ -234,10 +224,9 @@ def main():
         elif in_flare:
             amps = pdcflux_ratio[i - flare_dur - FLARE_PAD : i + FLARE_PAD]
             ts = time[i - flare_dur - FLARE_PAD : i + FLARE_PAD] * DAY
-            # E_f = E_flare(amps, ts, T_FLARE, LpS, LpF, R_STAR)
-            (i_f, E_f) = E_flare_model(amps, ts, T_FLARE, LpS, LpF, R_STAR)
+            (i_f, E_f) = E_flare(amps, ts, T_FLARE, LpS, LpF, R_STAR, "none")
             flare_energies.append(E_f / ERG)
-            # flare_impulses.append(i_f) # TODO check units!
+            flare_impulses.append(i_f) # TODO check units!
             flare_times.append(time[i - flare_dur])
             in_flare = False
             flare_dur = 0
@@ -246,8 +235,7 @@ def main():
 
     for i in range(len(flare_energies)):
         print(
-            "{:.6f} {:.6e}".format(flare_times[i], flare_energies[i])
-        )  # , #flare_impulses[i]))
+            "{:.6f}  {:.8e}  {:.8e}".format(flare_times[i], flare_energies[i], flare_impulses[i]))
 
 
 if __name__ == "__main__":
