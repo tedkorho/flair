@@ -37,6 +37,34 @@ def Model_exp(t, A, b, t0):
     )
     return y
 
+def Model_Davenport(t, A1, A2, k1, k2, a1, a2, a3, a4, t0):
+    """
+    Models a flare after the model in Davenport et al., 2014:
+    a 4th degree polynomial and a 2-regime decay afterwards.
+    """
+
+#TODO must avoid the pad
+
+    return np.piecewise([t, [t < t0, t>= t0],
+            [lambda tp: a1*(tp-t0) + a2*(tp-t0)**2 + a3*(tp-t0)**3 + a4*(tp-t0)**4 + (A1+A2),
+            lambda tp: A1*exp(-k1*(tp-t0)) + A2*exp(-k2*(tp-t0))
+            ]
+        ]
+    )
+
+def Model_Davenport_adapted(t, A1, A2, k1, k2, a1, t0):
+    """
+    Similar to Davenport, but with a simpler rise period (to avoid ill conditioned fits)
+    """
+
+#TODO must avoid the pad! Jesus
+
+    return np.piecewise([t, [t < t0, t>= t0],
+            [lambda tp: a1*(tp-t0) + (A1+A2),
+            lambda tp: A1*exp(-k1*(tp-t0)) + A2*exp(-k2*(tp-t0))
+            ]
+        ]
+    )
 
 
 def Model_flare(Fres, t, model):
@@ -51,6 +79,7 @@ def Model_flare(Fres, t, model):
 
     if model == "exp":
         f = Model_exp
+        
         # Initial guess roughly based on:
         #  - peak at maximum index
         #  - by flare's end, decay to 0.05 times the peak
@@ -63,6 +92,37 @@ def Model_flare(Fres, t, model):
             -np.log(0.05) / (t[-FLARE_PAD] - t[maxindex]),
             t[maxindex],
         ]
+    
+    if model == "Davenport":
+        f = Model_Davenport
+        
+        # Initial guess: exponential terms equal; maximum at 
+        
+        maxindex = np.argmax(Fres)
+        initialguess = [
+            -np.log(0.01) / (t[-FLARE_PAD] - t[maxindex]),
+            -np.log(0.1) / (t[-FLARE_PAD] - t[maxindex]),
+            3*np.max(Fres)/4, 
+            np.max(Fres)/4, 
+            1, 1, 1, 1,
+            t[maxindex]
+        ]
+
+    if model == "Davenport_adapted":
+        f = Model_Davenport
+        
+        # Initial guess: exponential terms equal; maximum at 
+        
+        maxindex = np.argmax(Fres)
+        initialguess = [
+            -np.log(0.01) / (t[-FLARE_PAD] - t[maxindex]),
+            -np.log(0.1) / (t[-FLARE_PAD] - t[maxindex]),
+            3*np.max(Fres)/4, 
+            np.max(Fres)/4, 
+            np.max(Fres),
+            t[maxindex]
+        ]
+
 
     popt, pcov = curve_fit(f, t.astype(np.float), Fres, p0=initialguess)
 
@@ -166,21 +226,20 @@ def E_flare(iamps, itimes, T_flare, LpS, LpF, R_star, model="none"):
     amps = iamps[~nans]
     times = itimes[~nans]
     L_f = lambda amp: L_flare(T_flare, A_flare(amp, LpS, LpF, R_star))
-    
+
     # Fmodel is a tuple; [0] is the optimized parameters,
     # [1] is the flare.
-     
 
-    if (model == "exp"):
+    if model == "exp":
         Fmodel = Model_flare(amps, times, "exp")
         impulsiveness = Fmodel[0][0]
         lumin = L_f(Fmodel[1])
         energy = simps(L_f(Fmodel[1]), times)  # not good enough, do explicit integral
-    
-    else: 
+
+    else:
         impulsiveness = np.max(amps)
         energy = simps(L_f(amps), times)
-    
+
     return (impulsiveness, energy)
 
 
@@ -226,7 +285,7 @@ def main():
             ts = time[i - flare_dur - FLARE_PAD : i + FLARE_PAD] * DAY
             (i_f, E_f) = E_flare(amps, ts, T_FLARE, LpS, LpF, R_STAR, "none")
             flare_energies.append(E_f / ERG)
-            flare_impulses.append(i_f) # TODO check units!
+            flare_impulses.append(i_f)
             flare_times.append(time[i - flare_dur])
             in_flare = False
             flare_dur = 0
@@ -235,7 +294,10 @@ def main():
 
     for i in range(len(flare_energies)):
         print(
-            "{:.6f}  {:.8e}  {:.8e}".format(flare_times[i], flare_energies[i], flare_impulses[i]))
+            "{:.6f}  {:.8e}  {:.8e}".format(
+                flare_times[i], flare_energies[i], flare_impulses[i]
+            )
+        )
 
 
 if __name__ == "__main__":
