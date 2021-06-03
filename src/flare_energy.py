@@ -47,22 +47,21 @@ def Model_Davenport(t, A1, A2, k1, k2, a1, a2, a3, a4, t0):
 
     return np.piecewise([t, [t < t0, t>= t0],
             [lambda tp: a1*(tp-t0) + a2*(tp-t0)**2 + a3*(tp-t0)**3 + a4*(tp-t0)**4 + (A1+A2),
-            lambda tp: A1*exp(-k1*(tp-t0)) + A2*exp(-k2*(tp-t0))
+            lambda tp: A1*np.exp(-k1*(tp-t0)) + A2*np.exp(-k2*(tp-t0))
             ]
         ]
     )
 
-def Model_Davenport_adapted(t, A1, A2, k1, k2, a1, t0):
+def Model_Davenport_adapted(t, A1, A2, k1, k2, t0):
     """
     Similar to Davenport, but with a simpler rise period (to avoid ill conditioned fits)
     """
 
 #TODO must avoid the pad! Jesus
 
-    return np.piecewise([t, [t < t0, t>= t0],
-            [lambda tp: a1*(tp-t0) + (A1+A2),
-            lambda tp: A1*exp(-k1*(tp-t0)) + A2*exp(-k2*(tp-t0))
-            ]
+    return np.piecewise(t, [t < t0, t>= t0],
+        [lambda tp: 0.0,
+        lambda tp: A1*np.exp(-k1*(tp-t0)) + A2*np.exp(-k2*(tp-t0))
         ]
     )
 
@@ -96,11 +95,11 @@ def Model_flare(Fres, t, model):
     if model == "Davenport":
         f = Model_Davenport
         
-        # Initial guess: exponential terms equal; maximum at 
+        # Initial guess: sharper exp higher, maximum at t0 
         
         maxindex = np.argmax(Fres)
         initialguess = [
-            -np.log(0.01) / (t[-FLARE_PAD] - t[maxindex]),
+            -np.log(0.05) / (t[-FLARE_PAD] - t[maxindex]),
             -np.log(0.1) / (t[-FLARE_PAD] - t[maxindex]),
             3*np.max(Fres)/4, 
             np.max(Fres)/4, 
@@ -109,17 +108,16 @@ def Model_flare(Fres, t, model):
         ]
 
     if model == "Davenport_adapted":
-        f = Model_Davenport
+        f = Model_Davenport_adapted
         
-        # Initial guess: exponential terms equal; maximum at 
+        # Initial guess: exponential terms equal, maximum at t0
         
         maxindex = np.argmax(Fres)
         initialguess = [
-            -np.log(0.01) / (t[-FLARE_PAD] - t[maxindex]),
+            np.max(Fres)/2., 
+            np.max(Fres)/2., 
+            -np.log(0.02) / (t[-FLARE_PAD] - t[maxindex]),
             -np.log(0.1) / (t[-FLARE_PAD] - t[maxindex]),
-            3*np.max(Fres)/4, 
-            np.max(Fres)/4, 
-            np.max(Fres),
             t[maxindex]
         ]
 
@@ -232,12 +230,20 @@ def E_flare(iamps, itimes, T_flare, LpS, LpF, R_star, model="none"):
 
     if model == "exp":
         Fmodel = Model_flare(amps, times, "exp")
-        impulsiveness = Fmodel[0][0]
+        impulsiveness = Fmodel[0][0]/2
         lumin = L_f(Fmodel[1])
+        # energy = L_f(Fmodel[0][0]*Fmodel[0][1]) Work out the units!!!
         energy = simps(L_f(Fmodel[1]), times)  # not good enough, do explicit integral
+    
+    elif model == "Davenport_adapted":
+        Fmodel = Model_flare(amps, times, "Davenport_adapted")
+        impulsiveness = (Fmodel[0][0]+Fmodel[0][1])/2
+        lumin = L_f(Fmodel[1])
+        #energy = Fmodel[0][0]*Fmodel[0][2] + Fmodel[0][1]*Fmodel[0][3]
+        energy = simps(L_f(Fmodel[1]), times) # same here!
 
     else:
-        impulsiveness = np.max(amps)
+        impulsiveness = np.max(amps)/2
         energy = simps(L_f(amps), times)
 
     return (impulsiveness, energy)
@@ -283,7 +289,7 @@ def main():
         elif in_flare:
             amps = pdcflux_ratio[i - flare_dur - FLARE_PAD : i + FLARE_PAD]
             ts = time[i - flare_dur - FLARE_PAD : i + FLARE_PAD] * DAY
-            (i_f, E_f) = E_flare(amps, ts, T_FLARE, LpS, LpF, R_STAR, "none")
+            (i_f, E_f) = E_flare(amps, ts, T_FLARE, LpS, LpF, R_STAR, model="exp")
             flare_energies.append(E_f / ERG)
             flare_impulses.append(i_f)
             flare_times.append(time[i - flare_dur])
