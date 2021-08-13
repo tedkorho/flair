@@ -27,56 +27,78 @@ T_STAR = params[10]
 T_FLARE = params[11]
 
 
-def Model_exp(t, A, b, t0):
+def Model_exp(t, A, b):
     """
     Models a flare that starts from t0, has a peak A, and decays like
     F(t) = Ae^(-b(t-t0)). 
     """
     y = np.piecewise(
-        t, [t < t0, t >= t0], [lambda tp: 0.0, lambda tp: A * np.exp(-b * (tp - t0))]
+        t, [t < 0, t >= 0], [lambda tp: 0.0, lambda tp: A * np.exp(-b * tp)]
     )
     return y
 
-def Model_Davenport(t, A1, A2, k1, k2, a1, a2, a3, a4, t0):
+def Model_Davenport(t, A1, A2, k1, k2, a1, a2, a3, a4):
     """
     Models a flare after the model in Davenport et al., 2014:
     a 4th degree polynomial and a 2-regime decay afterwards.
+    Assumes the flare peaks at t=0.
     """
 
-#TODO must avoid the pad
-
-    return np.piecewise([t, [t < t0, t>= t0],
-            [lambda tp: a1*(tp-t0) + a2*(tp-t0)**2 + a3*(tp-t0)**3 + a4*(tp-t0)**4 + (A1+A2),
-            lambda tp: A1*np.exp(-k1*(tp-t0)) + A2*np.exp(-k2*(tp-t0))
+    return np.piecewise([t, [t < 0., t>= 0.],
+            [lambda tp: a1*tp + a2*tp**2 + a3*tp**3 + a4*tp**4 + (A1+A2),
+            lambda tp: A1*np.exp(-k1*tp) + A2*np.exp(-k2*tp)
             ]
         ]
     )
 
-def Model_Davenport_adapted(t, A1, A2, k1, k2, t0):
+def Model_Davenport_adapted(t, A1, A2, k1, k2):
     """
-    Similar to Davenport, but with a simpler rise period (to avoid ill conditioned fits)
+    Similar to Davenport, but with a simpler linear rise period (to avoid ill conditioned fits)
     """
 
-#TODO must avoid the pad! Jesus
-
-    return np.piecewise(t, [t < t0, t>= t0],
-        [lambda tp: 0.0,
-        lambda tp: A1*np.exp(-k1*(tp-t0)) + A2*np.exp(-k2*(tp-t0))
+    return np.piecewise(t, [t < 0, t>= 0],
+        [lambda tp: 0.1,
+        lambda tp: A1*np.exp(-k1*tp)) + A2*np.exp(-k2*tp)
         ]
     )
 
 
-def Model_flare(Fres, t, model):
+def Model_flare(Fres, t, model="exp"):
 
     """
-    Returns the optimized flare according to a model.
+    Returns the optimized flare according to a model, and its energy.
     The model should also have the first parameter correspond to the peak of
-    the flare; 
+    the flare. The model is fit using an interpolation of the flux residuals,
+    by default normalized to the units used in Davenport (2014);
+    some helper values are provided in the beginning.
     """
+    
+    interpol = interp1d(t, Fres)
+    
+    x = np.linspace(np.min(t), np.max(t), 0.1/(24.*60.))
+    y = interpol(x)
+    maxx = x[np.argmax(y)]
+    maxy = np.max(y)
+    
+    # Find t_1/2 and use it for normalization
 
-    f = Model_exp
+    ctr = 0
+    t1 = x[0]
+    t2 = maxx
+    for i in range(len(x)):
+        if ctr = 0 and y[i] > 0.5*maxy:
+            ctr = 1
+            t1 = x[i]
+        if ctr = 1 and y[i] < 0.5*maxy:
+            t2 = x[i]
+            break
+
+    thalf = t2 - t1
+    x = (x-maxx)/thalf
+    y = y/maxy
 
     if model == "exp":
+        
         f = Model_exp
         
         # Initial guess roughly based on:
@@ -84,27 +106,27 @@ def Model_flare(Fres, t, model):
         #  - by flare's end, decay to 0.05 times the peak
         #  - start @ the beginning
 
-        maxindex = np.argmax(Fres)
+        maxindex = np.argmax(y)
 
         initialguess = [
-            np.max(Fres),
-            -np.log(0.05) / (t[-FLARE_PAD] - t[maxindex]),
-            t[maxindex],
+            1.,
+            -np.log(0.05) / (x[-FLARE_PAD] - x[maxindex])
         ]
     
     if model == "Davenport":
-        f = Model_Davenport
+        f = Model_Davenport(t, A1, A2, k1, k2, a1, a2, a3, a4)
         
         # Initial guess: sharper exp higher, maximum at t0 
         
-        maxindex = np.argmax(Fres)
+        maxindex = np.argmax(y)
+        thalf = 0. #TODO the t_1/2 thing from Davenport
+
         initialguess = [
-            -np.log(0.05) / (t[-FLARE_PAD] - t[maxindex]),
-            -np.log(0.1) / (t[-FLARE_PAD] - t[maxindex]),
-            3*np.max(Fres)/4, 
-            np.max(Fres)/4, 
-            1, 1, 1, 1,
-            t[maxindex]
+            -np.log(0.05) / (x[-FLARE_PAD] - x[maxindex]),
+            -np.log(0.1) / (x[-FLARE_PAD] - x[maxindex]),
+            3./4., 
+            1./4., 
+            1., 1., 1., 1.,
         ]
 
     if model == "Davenport_adapted":
@@ -122,9 +144,12 @@ def Model_flare(Fres, t, model):
         ]
 
 
-    popt, pcov = curve_fit(f, t.astype(np.float), Fres, p0=initialguess)
+    popt, pcov = curve_fit(f, x, y, p0=initialguess, method='trf')
 
-    return (popt, np.array([f(time, *popt) for time in t]))
+    Fres_model = f(x, *popt)*maxy
+    time = x*thalf + maxx
+    
+    return (maxy, time, Fres_model)
 
 
 def Response_TESS():
@@ -225,26 +250,38 @@ def E_flare(iamps, itimes, T_flare, LpS, LpF, R_star, model="none"):
     times = itimes[~nans]
     L_f = lambda amp: L_flare(T_flare, A_flare(amp, LpS, LpF, R_star))
 
-    # Fmodel is a tuple; [0] is the optimized parameters,
-    # [1] is the flare.
+    # Fmodel is a tuple; [0] is the maximum,
+    # [1] is the interpolated times,
+    # [2] is the modelled flare as an array.
+    
+#TODO make this compatible
 
     if model == "exp":
         Fmodel = Model_flare(amps, times, "exp")
-        impulsiveness = Fmodel[0][0]/2
-        lumin = L_f(Fmodel[1])
+        impulsiveness = Fmodel[0]/2
+        lumin = L_f(Fmodel[2])
         # energy = L_f(Fmodel[0][0]*Fmodel[0][1]) Work out the units!!!
-        energy = simps(L_f(Fmodel[1]), times)  # not good enough, do explicit integral
-    
+        energy = simps(lumin, Fmodel[1])
+
+    elif model == "Davenport":
+        Fmodel = Model_flare(amps, times, "Davenport")
+        impulsiveness = Fmodel[0]/2
+        lumin = L_f(Fmodel[2])
+        energy = simps(L_f(lumin, Fmodel[1]) # same here!
+
+
     elif model == "Davenport_adapted":
         Fmodel = Model_flare(amps, times, "Davenport_adapted")
-        impulsiveness = (Fmodel[0][0]+Fmodel[0][1])/2
-        lumin = L_f(Fmodel[1])
-        #energy = Fmodel[0][0]*Fmodel[0][2] + Fmodel[0][1]*Fmodel[0][3]
-        energy = simps(L_f(Fmodel[1]), times) # same here!
+        impulsiveness = Fmodel[0]/2
+        lumin = L_f(Fmodel[2])
+        energy = simps(L_f(lumin, Fmodel[1]) # same here!
 
     else:
         impulsiveness = np.max(amps)/2
-        energy = simps(L_f(amps), times)
+        interp = interp1d(times, amps)
+        x = np.linspace(np.min(times), np.max(times), 0.1/(24.*60.))
+        y = interp(x)
+        energy = simps(L_f(y), x)
 
     return (impulsiveness, energy)
 
