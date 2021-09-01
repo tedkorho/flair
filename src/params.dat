@@ -10,3 +10,6 @@
 1.02298             # RADIUS OF THE STAR (R_sun)
 5798.0              # EFFECTIVE TEMPERATURE OF THE STAR (K)
 9000.0              # EFFECTIVE TEMPERATURE OF THE MODELLED FLARE
+2                   # FLARE MODEL: 1 exp, 2 Davenport
+3                   # PAD FLARE LEFT
+7                   # PAD FLARE RIGHT
