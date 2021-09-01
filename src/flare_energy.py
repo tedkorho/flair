@@ -94,8 +94,6 @@ def fit_Davenport(x, y):
         -np.log(0.1) / (x[-FLARE_PAD_1]),
     ]
 
-    # TODO error handling because curve_fit may fail!
-
     try:
         popt1, pcov1 = curve_fit(f1, x[x >= 0], y[x >= 0], p0=guess1, method="lm")
 
@@ -113,36 +111,6 @@ def fit_Davenport(x, y):
         Fres_model = fit_exp(x, y)
 
     return Fres_model
-
-
-def Model_Davenport(t, A1, A2, k1, k2, a1, a2, a3, a4):
-    """
-    Models a flare after the model in Davenport et al., 2014:
-    a 4th degree polynomial and a 2-regime decay afterwards.
-    Assumes the flare peaks at t=0.
-    """
-
-    return np.piecewise(
-        t,
-        [t < 0.0, t >= 0.0],
-        [
-            lambda tp: a1 * tp + a2 * tp ** 2 + a3 * tp ** 3 + a4 * tp ** 4 + (A1 + A2),
-            lambda tp: A1 * np.exp(-k1 * tp) + A2 * np.exp(-k2 * tp),
-        ],
-    )
-
-
-def Model_Davenport_adapted(t, A1, A2, k1, k2):
-    """
-    Similar to Davenport, but with a simpler linear rise period (to avoid ill conditioned fits)
-    """
-
-    return np.piecewise(
-        t,
-        [t < 0, t >= 0],
-        [lambda tp: 0.1, lambda tp: A1 * np.exp(-k1 * tp) + A2 * np.exp(-k2 * tp)],
-    )
-
 
 def Model_double_flare(times, t1, t2):
     """
@@ -195,23 +163,6 @@ def Model_flare(Fres, t, model="exp"):
 
     if model == "Davenport":
         Fres_model = fit_Davenport(x, y) * maxy
-
-    if model == "Davenport_adapted":
-        f = Model_Davenport_adapted
-
-        # Initial guess: exponential terms equal, maximum at t0
-
-        maxindex = np.argmax(Fres)
-        initialguess = [
-            np.max(Fres) / 2.0,
-            np.max(Fres) / 2.0,
-            -np.log(0.02) / (t[-FLARE_PAD] - t[maxindex]),
-            -np.log(0.1) / (t[-FLARE_PAD] - t[maxindex]),
-            t[maxindex],
-        ]
-
-        popt, pcov = curve_fit(f, x, y, p0=guess, method="trf")
-        Fres_model = f(x, *popt) * maxy
 
     times = x * thalf + maxx
 
@@ -323,8 +274,6 @@ def E_flare(
     # Fmodel is a tuple; [0] is the maximum,
     # [1] is the interpolated times,
     # [2] is the modelled flare as an array.
-
-    # TODO actually the whole modelling bit can move to its own functions
 
     impulsiveness = Fmodel[0] / 2
     lumin = L_f(Fmodel[2])
