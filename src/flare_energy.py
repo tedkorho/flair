@@ -34,6 +34,14 @@ FLARE_PAD_1 = int(params[13])
 FLARE_PAD_2 = int(params[14])
 PLOT = True
 
+# Returns the chi-squared value of the given data with predictions from the model
+
+def chisq(data, model):
+    """
+    """    
+
+    return np.sum((data-model)**2/model) 
+    
 
 def Model_exp(t, A, b):
     """
@@ -271,7 +279,7 @@ def fit_multiple_flare(Fres, n, peaktimes, t, model="exp"):
 
     time0 = time()
     interpol = interp1d(t, Fres, fill_value="extrapolate")
-    x = np.arange(t[0], t[-1], 5.0 / (24.0 * 60.0))
+    x = np.arange(t[0], t[-1], 10.0) # Unit is seconds here!
     y = interpol(x)
     initialguess = []
     y_model = np.zeros(len(y))
@@ -282,7 +290,6 @@ def fit_multiple_flare(Fres, n, peaktimes, t, model="exp"):
     x = (x - maxx) / thalf
     y = y / maxy
    
-    print(x)
 
     if model == "exp":
         f = Model_exp
@@ -292,7 +299,6 @@ def fit_multiple_flare(Fres, n, peaktimes, t, model="exp"):
 
     for i in range(n):
         # Find an initial guess
-        print(y_model)
         y_i = y - y_model
         fp = lambda tp, a, b : a*f(tp*b - peaktimes[i])
         popt, pcov = curve_fit(fp, x, y_i)
@@ -314,10 +320,7 @@ def fit_multiple_flare(Fres, n, peaktimes, t, model="exp"):
     
     times = x * thalf + maxx
 
-    # TODO RETURN ALL THE MODELS (DERIVE FROM OPT. PARAM)
-    # PLUS ALTER THE PLOT FUNCTION
     # TODO BIC CALCULATION
-    print(y_model)
     
     if PLOT == True:
         plt.plot(x, y_model*maxy)
@@ -325,15 +328,18 @@ def fit_multiple_flare(Fres, n, peaktimes, t, model="exp"):
             Fmodel_i = popt[2 * i]*f(x*popt[2 * i + 1]-peaktimes[i])*maxy
             plt.plot(x, Fmodel_i)
         plt.plot((t-maxx)/thalf, Fres, "ro")
-        #plt.legend(["Sum of flares"])
         plt.show()
 
     Fres_models = []
+    Fres_peaks = []
+    t_peaks = []
+
     for i in range(n):
         Fres_models.append(popt[2 * i]*f(x*popt[2 * i + 1]-peaktimes[i])*maxy)
+        Fres_peaks.append(np.max(Fres_models[i]))
+        t_peaks.append(times[np.argmax(Fres_models[i])])
 
-
-    return (peaktimes, times, Fres_models)
+    return (Fres_peaks, times, Fres_models, t_peaks)
 
 
 def Model_flare(Fres, t, model="exp"):
@@ -345,9 +351,10 @@ def Model_flare(Fres, t, model="exp"):
     by default normalized to the units used in Davenport (2014);
     some helper values are provided in the beginning.
     """
+    
     time0 = time()
     interpol = interp1d(t, Fres, fill_value="extrapolate")
-    x = np.arange(t[0], t[-1], 5.0 / (24.0 * 60.0))
+    x = np.arange(t[0], t[-1], 10.0)
     y = interpol(x)
     maxx = x[np.argmax(y)]
     maxy = np.max(y)
@@ -509,7 +516,7 @@ def main():
     flare_times = []
     in_flare = False
     flare_dur = 0
-
+    
     for i in range(len(pdcflux)):
         if np.isnan(trend[i]):
             if in_flare:
@@ -528,8 +535,25 @@ def main():
             t = ts[~nans]
 
             Fmodel = Model_flare(Fres, t, model=FLARE_MODEL)
+            
+            # BIC = chisq(Fres, Fmodel[2]) + np.log(len(Fres))
+            # print(BIC)
+            # TODO BIC will still need the parametric model for the length of t/Fres/whatever
 
-            multiflare = input("Multiple flare model? Y/N\n")
+            multiflare = "n"
+
+            accept = input("Accept model? Y/N\n")
+            
+            if accept == "N" or accept == "n":
+                multiflare = input("Multiple flare model? Y/N\n")
+                if multiflare == "n" or multiflare == "N":
+                    print("Flare rejected.")
+
+                (i_f, E_f) = E_flare(Fmodel, T_FLARE, LpS, LpF, R_STAR)
+                flare_energies.append(E_f / ERG)
+                flare_impulses.append(i_f)
+                flare_times.append(times[i - flare_dur])
+
 
             if multiflare == "Y" or multiflare == "y":
 
@@ -550,23 +574,23 @@ def main():
                     )
 
                 Fmodel = fit_multiple_flare(Fres, nflare, tpeak, t, model=FLARE_MODEL)
+                
+                Fmodel_sum = np.sum(Fmodel[2])
+                # TODO implement getting Fres as a model
+                # BIC = nflare * np.log(len(Fmodel_sum)) + chisq(Fres, Fmodel)
+                # print(BIC)
 
                 for i in range(nflare):
                     (i_f, E_f) = E_flare(
-                        [Fmodel[0], Fmodel[1], Fmodel[2][i]], T_FLARE, LpS, LpF, R_STAR
+                        [Fmodel[0][i], Fmodel[1], Fmodel[2][i]], T_FLARE, LpS, LpF, R_STAR
                     )
                     flare_energies.append(E_f / ERG)
                     flare_impulses.append(i_f)
-                    flare_times.append(time)
-
-            else:
-                (i_f, E_f) = E_flare(Fmodel, T_FLARE, LpS, LpF, R_STAR)
-                flare_energies.append(E_f / ERG)
-                flare_impulses.append(i_f)
-                flare_times.append(times[i - flare_dur])
-
-            in_flare = False
+                    flare_times.append(Fmodel[3][i] / DAY)
+                           
             flare_dur = 0
+            in_flare = False
+            
 
     # Print the flare energies to stdout
 
