@@ -34,14 +34,33 @@ FLARE_PAD_1 = int(params[13])
 FLARE_PAD_2 = int(params[14])
 PLOT = True
 
-# Returns the chi-squared value of the given data with predictions from the model
+# TODO REFACTORING:
+#    - more uniform variable naming! (go through this w/ notebook)
+#    - single and multiple flare models w/ same function
+#    - find & minimize hardcoded constants 
+#    - consider:
+#       some functions in a separate file
+#       slimming down the main loop
+#       deprecate old "fit X" type functions
+#       a clear place to add flare models
+#       detection of degrees of freedom etc. so that the
+#        models aren't assumed to have 3 parameters
 
-def chisq(data, model):
+# TODO Issues to solve (then all done):
+#    - sometimes negative / weird fits (solve issue w/ bounds OR regularization OR manual peaks)
+#    - the thing where the base level comes from a polynomial fit
+#    - BIC working properly
+#    - ensure that the energy is integrated correctly: easiest done by comparing
+#       to the AB Dor paper
+
+def sqerr(data, model):
     """
-    """    
+    Is supposed to return the chi-squared (or similar) value indicating
+    the error in the model
+    """
 
-    return np.sum((data-model)**2/model) 
-    
+    return np.sum((data - model) ** 2)/np.var(data)
+
 
 def Model_exp(t, A, b):
     """
@@ -72,7 +91,7 @@ def fit_exp(x, y):
     popt, pcov = curve_fit(f, x, y, p0=guess, method="trf")
 
     Fres_model = f(x, *popt)
-    return Fres_model
+    return popt
 
 
 def find_thalf(x, y, maxx, maxy):
@@ -145,11 +164,11 @@ def Model_Davenport(t):
 
     y = np.zeros(len(t))
     y[t >= 0.0] = Model_double_exp(t[t >= 0.0], *exp_params)
-    mask = ((t >= -1.) & (t < 0.0))
+    mask = (t >= -1.0) & (t < 0.0)
     y[mask] = Model_quart_poly(t[mask], *quart_params)
-    
+
     return y
-     
+
 
 def fit_Davenport(x, y):
     """
@@ -187,8 +206,7 @@ def fit_Davenport(x, y):
         Fres_model = fit_exp(x, y)
         print("{0}".format(err))
 
-    return Fres_model
-
+    return [*popt0, *popt1]
 
 
 def fit_Davenport_2(x, y):
@@ -197,18 +215,36 @@ def fit_Davenport_2(x, y):
     """
 
     try:
-        f = lambda xp, a, b : a * Model_Davenport(xp*b)
+        f = lambda xp, a, b, c: a * Model_Davenport(b * (xp - c))
         popt1, pcov1 = curve_fit(
-            f, x, y
+            f, x, y, bounds=([0.0, 0.0, -np.inf], [np.inf, np.inf, np.inf])
         )
 
-        Fres_model = popt1[0]*Model_Davenport(x*popt1[1])
+        Fres_model = f(x, *popt1)
 
     except RuntimeError as err:
         Fres_model = fit_exp(x, y)
         print("{0}".format(err))
 
-    return Fres_model
+    return popt1
+
+def plot_flare_models(tdata, Fres_data, tmodel, ymodel, peaktimes, f, popt, BIC, nflare):
+    """
+    Takes in data points, 
+    """
+
+    plt.clf()
+    plt.plot(tmodel, ymodel)
+    plt.legend(["BIC = {:.3f}".format(BIC)])
+    for i in range(nflare):
+        Fmodel_i = (
+            popt[2 * i]
+            * f(popt[2 * i + 1] * (tmodel - peaktimes[i] - popt[2 * i + 2]))
+        )
+        plt.plot(tmodel, Fmodel_i)
+    
+    plt.plot(tdata, Fres_data, "ro")
+    plt.show(block=False)
 
 
 
@@ -225,11 +261,16 @@ def fit_multiple_flare(Fres, n, peaktimes, t, model="exp"):
 
     time0 = time()
     interpol = interp1d(t, Fres, fill_value="extrapolate")
-    x = np.arange(t[0], t[-1], 10.0) # Unit is seconds here!
+    x = np.arange(t[0], t[-1], 10.0)  # Unit is seconds here!
     y = interpol(x)
     initialguess = []
+    bounds = ([], [])
+    lower = [0.0, 0.0, -0.5]
+    upper = [3.0, 5.0, 0.5]
+
     y_model = np.zeros(len(y))
-    
+    y_obs = np.zeros(len(t))
+
     maxx = x[np.argmax(np.abs(y))]
     maxy = np.max(y)
     thalf = find_thalf(x, y, maxx, maxy)  # TODO DAVENPORT
@@ -245,42 +286,58 @@ def fit_multiple_flare(Fres, n, peaktimes, t, model="exp"):
     for i in range(n):
         # Find an initial guess
         y_i = y - y_model
-        fp = lambda tp, a, b : a*f(b*(tp - peaktimes[i]))
-        popt, pcov = curve_fit(fp, x, y_i)
+        fp = lambda tp, a, b, c: a * f(b * (tp - peaktimes[i] - c))
+        popt, pcov = curve_fit(fp, x, y_i, bounds=(lower, upper))
         initialguess.extend(popt)
 
+        bounds[0].extend(lower)
+        bounds[1].extend(upper)
+        
+        # Refactor this into an own function?
+
         fi = lambda tp, *args: np.sum(
-            [args[2 * j] * f(args[2 * j + 1]*(tp - peaktimes[j])) for j in range(i + 1)],axis=0
+            [
+                args[2 * j] * f(args[2 * j + 1] * (tp - peaktimes[j] - args[2 * j + 2]))
+                for j in range(i + 1)
+            ],
+            axis=0,
         )
 
         # Dirty one liner that sums up the flares for an i-flare model. Currently only works for
-        # a 2 parameter model f.
+        # a 3 parameter model f.
 
-        popt, pcov = curve_fit(fi, x, y, p0=initialguess)
+        # TODO REGULARIZATION METHOD TO GET RID OF WEIRD BEHAVIOR
+        # TODO list for that:
+        #  - change curve_fit to scipy's minimization (risky?)
+        #  - define cost function that minimizes the error and severely punishes weird behavior
+        #    (negative or very large arguments a/b/c)
+
+        popt, pcov = curve_fit(fi, x, y, p0=initialguess, bounds=bounds)
         for j in range(len(initialguess)):
             initialguess[j] = popt[j]
 
         y_model = fi(x, *popt)
-        
-    
+        y_obs = fi((t - maxx)/thalf, *popt)*maxy
+
     times = x * thalf + maxx
 
-    # TODO BIC CALCULATION HERE
+    BIC = sqerr(Fres, y_obs)/(len(t) - 3*n) + 3.*n*np.log(len(t))
     
     if PLOT == True:
-        plt.plot(x, y_model*maxy)
-        for i in range(n):
-            Fmodel_i = popt[2 * i]*f(popt[2 * i + 1]*(x-peaktimes[i]))*maxy
-            plt.plot(x, Fmodel_i)
-        plt.plot((t-maxx)/thalf, Fres, "ro")
-        plt.show(block = False)
-
+        tdata = (t-maxx)/thalf
+        plot_flare_models(tdata, Fres/maxy, x, y_model, peaktimes, f, popt, BIC, n)
+# TODO make this function call a little more elegant
+        
     Fres_models = []
     Fres_peaks = []
     t_peaks = []
 
     for i in range(n):
-        Fres_models.append(popt[2 * i]*f(popt[2 * i + 1]*(x-peaktimes[i]))*maxy)
+        Fres_models.append(
+            popt[2 * i]
+            * f(popt[2 * i + 1] * (x - peaktimes[i] - popt[2 * i + 2]))
+            * maxy
+        )
         Fres_peaks.append(np.max(Fres_models[i]))
         t_peaks.append(times[np.argmax(Fres_models[i])])
 
@@ -297,7 +354,8 @@ def Model_flare(Fres, t, model="exp"):
     some helper values are provided in the beginning.
     """
     
-    time0 = time()
+# TODO consider refactoring this s.t. it uses the same fn. as the multiple flare fitting
+
     interpol = interp1d(t, Fres, fill_value="extrapolate")
     x = np.arange(t[0], t[-1], 10.0)
     y = interpol(x)
@@ -308,23 +366,35 @@ def Model_flare(Fres, t, model="exp"):
     y = y / maxy
 
     Fres_model = np.zeros(len(x))
+    ndeg = 1
 
     if model == "exp":
-        Fres_model = fit_exp(x, y) * maxy
+        f = Model_exp
+        ndeg = 2
+        popt = fit_exp(x, y)
 
     if model == "Davenport":
-        Fres_model = fit_Davenport(x, y) * maxy
+        f = Model_Davenport
+        ndeg = 2
+        popt = fit_Davenport(x,y)
 
     if model == "Davenport2":
-        Fres_model = fit_Davenport_2(x, y) * maxy
-
+        ndeg = 3
+        f = lambda xp, a, b, c: a * Model_Davenport(b * (xp - c))
+        popt = fit_Davenport_2(x, y)
+        
+    Fres_model = f(x, *popt) * maxy
     times = x * thalf + maxx
-    xt = (t - maxx)/thalf
+    xt = (t - maxx) / thalf
+    Fres_obs = f((t - maxx) / thalf, *popt)
+    BIC = sqerr(Fres, Fres_obs*maxy)/(len(t) - 3) + 3.*np.log(len(t))
 
     if PLOT == True:
+        plt.clf()
         plt.plot(x, Fres_model)
         plt.plot(xt, Fres, "ro")
-        plt.show(block = False)
+        plt.legend(["Fit; BIC = {:.3f}".format(BIC), "Data"])
+        plt.show(block=False)
 
     return (maxy, times, Fres_model)
 
@@ -480,16 +550,12 @@ def main():
             t = ts[~nans]
 
             Fmodel = Model_flare(Fres, t, model=FLARE_MODEL)
-            
-            # BIC = chisq(Fres, Fmodel[2]) + np.log(len(Fres))
-            # print(BIC)
-            # TODO BIC will still need the parametric model for the length of t/Fres/whatever
 
             multiflare = "n"
             retry = "y"
 
             accept = input("Accept model? Y/N\n")
-            
+
             if accept == "N" or accept == "n":
                 multiflare = input("Multiple flare model? Y/N\n")
                 if multiflare == "n" or multiflare == "N":
@@ -500,7 +566,7 @@ def main():
                 flare_impulses.append(i_f)
                 flare_times.append(times[i - flare_dur])
 
-            while(True):
+            while True:
                 if multiflare == "n" or multiflare == "N":
                     break
                 if retry == "n" or retry == "N":
@@ -523,33 +589,33 @@ def main():
                     )
 
                 Fmodel = fit_multiple_flare(Fres, nflare, tpeak, t, model=FLARE_MODEL)
-                
+
                 Fmodel_sum = np.sum(Fmodel[2])
-                # TODO implement getting Fres as a model
-                # BIC = nflare * np.log(len(Fmodel_sum)) + chisq(Fres, Fmodel)
-                # print(BIC)
 
                 accept = input("Accept model? Y/N\n")
-                if (accept == "n" or accept == "N"):
+                if accept == "n" or accept == "N":
                     retry = input("Retry fit? Y/N\n")
                     continue
 
                 for i in range(nflare):
                     (i_f, E_f) = E_flare(
-                        [Fmodel[0][i], Fmodel[1], Fmodel[2][i]], T_FLARE, LpS, LpF, R_STAR
+                        [Fmodel[0][i], Fmodel[1], Fmodel[2][i]],
+                        T_FLARE,
+                        LpS,
+                        LpF,
+                        R_STAR,
                     )
                     flare_energies.append(E_f / ERG)
                     flare_impulses.append(i_f)
                     flare_times.append(Fmodel[3][i] / DAY)
-                
+
                 break
-                           
+
             flare_dur = 0
             in_flare = False
-            
 
     # Print the flare energies to stdout
-    
+
     output = []
 
     for i in range(len(flare_energies)):
@@ -558,10 +624,11 @@ def main():
                 flare_times[i], flare_energies[i], flare_impulses[i]
             )
         )
-    
+
     outf = open("out/energies.out", "a")
     outf.writelines(output)
     outf.close()
-    
+
+
 if __name__ == "__main__":
     main()
