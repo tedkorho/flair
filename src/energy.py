@@ -62,7 +62,7 @@ def sqerr(data, model):
     return np.sum((data - model) ** 2)/np.var(data)
 
 
-def Model_exp(t, A, b):
+def model_exp(t, A, b):
     """
     Models a flare that starts from t0, has a peak A, and decays like
     F(t) = Ae^(-b(t-t0)). 
@@ -71,27 +71,6 @@ def Model_exp(t, A, b):
         t, [t < 0, t >= 0], [lambda tp: 0.0, lambda tp: A * np.exp(-b * tp)]
     )
     return y
-
-
-def fit_exp(x, y):
-    """
-    Fits a simple exponential model to data
-    """
-    f = Model_exp
-
-    # Initial guess roughly based on:
-    #  - peak at maximum index
-    #  - by flare's end, decay to 0.05 times the peak
-    #  - start @ the beginning
-
-    maxindex = np.argmax(y)
-
-    guess = [1.0, -np.log(0.05) / (x[-FLARE_PAD_1] - x[maxindex])]
-
-    popt, pcov = curve_fit(f, x, y, p0=guess, method="trf")
-
-    Fres_model = f(x, *popt)
-    return popt
 
 
 def find_thalf(x, y, maxx, maxy):
@@ -118,7 +97,7 @@ def zero(ts):
     return np.zeros(len(ts))
 
 
-def Model_double_exp(t, A1, A2, k1, k2):
+def model_double_exp(t, A1, A2, k1, k2):
     """
     Models the tail of a flare that starts from t0, has a peak A, and decays like
     F(t) = A1*e^(-k1(t-t0)) + A2*e^(-k2(t-t0)) 
@@ -128,13 +107,13 @@ def Model_double_exp(t, A1, A2, k1, k2):
     return y
 
 
-def Model_quad_poly_fix(t, A, a2):
+def model_quad_poly_fix(t, A, a2):
     a1 = a2 + A
     y = A + a1 * t + a2 * t ** 2
     return y
 
 
-def Model_quart_poly_fix(t, A, a1, a3, a4):
+def model_quart_poly_fix(t, A, a1, a3, a4):
     """
     Models the buildup of a flare that starts from t0, has a peak at x=0 (given by A), 
     and behaves like a quartic polynomial. Is also fixed to have derivative and value zero at
@@ -146,7 +125,7 @@ def Model_quart_poly_fix(t, A, a1, a3, a4):
     return y
 
 
-def Model_quart_poly(t, a1, a2, a3, a4):
+def model_quart_poly(t, a1, a2, a3, a4):
     """
     Models the buildup of a flare that starts from t0, has a peak at A, and behaves like
     a quartic polynomial.
@@ -155,7 +134,7 @@ def Model_quart_poly(t, a1, a2, a3, a4):
     return y
 
 
-def Model_Davenport(t):
+def model_davenport(t):
     """
     Simple version of the Davenport model, specifically for fitting multiple flares. 
     """
@@ -163,72 +142,14 @@ def Model_Davenport(t):
     quart_params = [1.941, -0.175, -2.246, -1.125]
 
     y = np.zeros(len(t))
-    y[t >= 0.0] = Model_double_exp(t[t >= 0.0], *exp_params)
+    y[t >= 0.0] = model_double_exp(t[t >= 0.0], *exp_params)
     mask = (t >= -1.0) & (t < 0.0)
-    y[mask] = Model_quart_poly(t[mask], *quart_params)
+    y[mask] = model_quart_poly(t[mask], *quart_params)
 
     return y
 
 
-def fit_Davenport(x, y):
-    """
-    Fits Davenport's model from Davenport et al. 2014 [TODO citation here]
-    """
-
-    f1 = Model_double_exp
-    # Initial guess: sharper exp higher, maximum at t0
-
-    guess1 = [
-        3.0 / 4.0,
-        1.0 / 4.0,
-        -np.log(0.05) / (x[-FLARE_PAD_1]),
-        -np.log(0.1) / (x[-FLARE_PAD_1]),
-    ]
-
-    try:
-        bounds = (0.0, [2.0, 2.0, np.infty, np.infty])
-
-        popt1, pcov1 = curve_fit(
-            f1, x[x >= 0], y[x >= 0], p0=guess1, method="dogbox", bounds=bounds
-        )
-
-        A = popt1[0] + popt1[1]
-
-        f0 = lambda tp, a1, a3, a4: Model_quart_poly_fix(tp, A, a1, a3, a4)
-        # f0 = lambda tp, a1, a2, a3, a4: Model_quart_poly(tp, A, a1, a2, a3, a4)
-        mask0 = np.logical_and(x < 0, x >= -1)
-        popt0, pcov0 = curve_fit(f0, x[mask0], y[mask0])
-        Fres_model = np.zeros(len(x))
-        Fres_model[mask0] = f0(x[mask0], *popt0)
-        Fres_model[x >= 0] = f1(x[x >= 0], *popt1)
-
-    except RuntimeError as err:
-        Fres_model = fit_exp(x, y)
-        print("{0}".format(err))
-
-    return [*popt0, *popt1]
-
-
-def fit_Davenport_2(x, y):
-    """
-    Fits Davenport's model from Davenport et al. 2014 [TODO citation here]
-    """
-
-    try:
-        f = lambda xp, a, b, c: a * Model_Davenport(b * (xp - c))
-        popt1, pcov1 = curve_fit(
-            f, x, y, bounds=([0.0, 0.0, -np.inf], [np.inf, np.inf, np.inf])
-        )
-
-        Fres_model = f(x, *popt1)
-
-    except RuntimeError as err:
-        Fres_model = fit_exp(x, y)
-        print("{0}".format(err))
-
-    return popt1
-
-def plot_flare_models(tdata, Fres_data, tmodel, ymodel, peaktimes, f, popt, BIC, nflare):
+def plot_flare_models(tdata, fres_data, tmodel, ymodel, peaktimes, f, popt, BIC, nflare):
     """
     Takes in data points, 
     """
@@ -237,19 +158,19 @@ def plot_flare_models(tdata, Fres_data, tmodel, ymodel, peaktimes, f, popt, BIC,
     plt.plot(tmodel, ymodel)
     plt.legend(["BIC = {:.3f}".format(BIC)])
     for i in range(nflare):
-        Fmodel_i = (
+        fmodel_i = (
             popt[2 * i]
             * f(popt[2 * i + 1] * (tmodel - peaktimes[i] - popt[2 * i + 2]))
         )
-        plt.plot(tmodel, Fmodel_i)
+        plt.plot(tmodel, fmodel_i)
     
-    plt.plot(tdata, Fres_data, "ro")
+    plt.plot(tdata, fres_data, "ro")
     plt.show(block=False)
 
 
 
 
-def fit_multiple_flare(Fres, n, peaktimes, t, model="exp"):
+def model_flare(fres, n, peaktimes, t, model="exp"):
 
     """
     Returns the optimized flare according to a model, and its energy.
@@ -260,7 +181,7 @@ def fit_multiple_flare(Fres, n, peaktimes, t, model="exp"):
     """
 
     time0 = time()
-    interpol = interp1d(t, Fres, fill_value="extrapolate")
+    interpol = interp1d(t, fres, fill_value="extrapolate")
     x = np.arange(t[0], t[-1], 10.0)  # Unit is seconds here!
     y = interpol(x)
     initialguess = []
@@ -278,10 +199,10 @@ def fit_multiple_flare(Fres, n, peaktimes, t, model="exp"):
     y = y / maxy
 
     if model == "exp":
-        f = Model_exp
+        f = model_exp
 
     if model == "Davenport" or model == "Davenport2":
-        f = Model_Davenport
+        f = model_davenport
 
     for i in range(n):
         # Find an initial guess
@@ -321,85 +242,31 @@ def fit_multiple_flare(Fres, n, peaktimes, t, model="exp"):
 
     times = x * thalf + maxx
 
-    BIC = sqerr(Fres, y_obs)/(len(t) - 3*n) + 3.*n*np.log(len(t))
+    BIC = sqerr(fres, y_obs)/(len(t) - 3*n) + 3.*n*np.log(len(t))
     
     if PLOT == True:
         tdata = (t-maxx)/thalf
-        plot_flare_models(tdata, Fres/maxy, x, y_model, peaktimes, f, popt, BIC, n)
+        plot_flare_models(tdata, fres/maxy, x, y_model, peaktimes, f, popt, BIC, n)
 # TODO make this function call a little more elegant
         
-    Fres_models = []
-    Fres_peaks = []
+    fres_models = []
+    fres_peaks = []
     t_peaks = []
 
     for i in range(n):
-        Fres_models.append(
+        fres_models.append(
             popt[2 * i]
             * f(popt[2 * i + 1] * (x - peaktimes[i] - popt[2 * i + 2]))
             * maxy
         )
-        Fres_peaks.append(np.max(Fres_models[i]))
-        t_peaks.append(times[np.argmax(Fres_models[i])])
+        fres_peaks.append(np.max(fres_models[i]))
+        t_peaks.append(times[np.argmax(fres_models[i])])
 
-    return (Fres_peaks, times, Fres_models, t_peaks)
-
-
-def Model_flare(Fres, t, model="exp"):
-
-    """
-    Returns the optimized flare according to a model, and its energy.
-    The model should also have the first parameter correspond to the peak of
-    the flare. The model is fit using an interpolation of the flux residuals,
-    by default normalized to the units used in Davenport (2014);
-    some helper values are provided in the beginning.
-    """
-    
-# TODO consider refactoring this s.t. it uses the same fn. as the multiple flare fitting
-
-    interpol = interp1d(t, Fres, fill_value="extrapolate")
-    x = np.arange(t[0], t[-1], 10.0)
-    y = interpol(x)
-    maxx = x[np.argmax(y)]
-    maxy = np.max(y)
-    thalf = find_thalf(x, y, maxx, maxy)
-    x = (x - maxx) / thalf
-    y = y / maxy
-
-    Fres_model = np.zeros(len(x))
-    ndeg = 1
-
-    if model == "exp":
-        f = Model_exp
-        ndeg = 2
-        popt = fit_exp(x, y)
-
-    if model == "Davenport":
-        f = Model_Davenport
-        ndeg = 2
-        popt = fit_Davenport(x,y)
-
-    if model == "Davenport2":
-        ndeg = 3
-        f = lambda xp, a, b, c: a * Model_Davenport(b * (xp - c))
-        popt = fit_Davenport_2(x, y)
-        
-    Fres_model = f(x, *popt) * maxy
-    times = x * thalf + maxx
-    xt = (t - maxx) / thalf
-    Fres_obs = f((t - maxx) / thalf, *popt)
-    BIC = sqerr(Fres, Fres_obs*maxy)/(len(t) - 3) + 3.*np.log(len(t))
-
-    if PLOT == True:
-        plt.clf()
-        plt.plot(x, Fres_model)
-        plt.plot(xt, Fres, "ro")
-        plt.legend(["Fit; BIC = {:.3f}".format(BIC), "Data"])
-        plt.show(block=False)
-
-    return (maxy, times, Fres_model)
+    return (fres_peaks, times, fres_models, t_peaks)
 
 
-def Response_TESS():
+
+def response_TESS():
 
     """
     Returns the TESS response curve as a function of the wavelength
@@ -413,7 +280,7 @@ def Response_TESS():
     return f
 
 
-R_tess = Response_TESS()
+R_tess = response_TESS()
 
 
 def B(lambd, T):
@@ -448,7 +315,7 @@ def Lp_STAR(R_star, T_star, R_TESS):
     )  # radiance -> flux density on a sphere -> luminosity
 
 
-def Lp_FLARE_DENSITY(T_flare, R_TESS):
+def Lp_flare_density(T_flare, R_TESS):
 
     """
     Incident luminosity density of the flare in the TESS band, divided by its
@@ -515,22 +382,20 @@ def main():
     args = parser.parse_args()
 
     LpS = Lp_STAR(R_STAR, T_STAR, R_tess)
-    LpF = Lp_FLARE_DENSITY(T_FLARE, R_tess)
+    LpF = Lp_flare_density(T_FLARE, R_tess)
 
     # Load the lightcurve with flagged flare times
 
     data = np.loadtxt(args.inputfile)
     pdcflux = data[:, 1]
-    times = data[:, 0]
+    t = data[:, 0]
     trend = data[:, 2]
     flarestamps = data[:, 3]
     pdcflux_ratio = (pdcflux - trend) / trend
 
-    flare_energies = []
-    flare_impulses = []
-    flare_times = []
     in_flare = False
     flare_dur = 0
+    output = []
 
     for i in range(len(pdcflux)):
         if np.isnan(trend[i]):
@@ -544,12 +409,13 @@ def main():
 
         elif in_flare:
             amps = pdcflux_ratio[i - flare_dur - FLARE_PAD_1 : i + FLARE_PAD_2]
-            ts = times[i - flare_dur - FLARE_PAD_1 : i + FLARE_PAD_2] * DAY
+            twin = t[i - flare_dur - FLARE_PAD_1 : i + FLARE_PAD_2] * DAY
             nans = np.isnan(amps)
-            Fres = amps[~nans]
-            t = ts[~nans]
+            fres = amps[~nans]
+            twin = twin[~nans]
+            nflare = 1
 
-            Fmodel = Model_flare(Fres, t, model=FLARE_MODEL)
+            fmodel = model_flare(fres, nflare, [0.0], twin, model=FLARE_MODEL)
 
             multiflare = "n"
             retry = "y"
@@ -560,12 +426,7 @@ def main():
                 multiflare = input("Multiple flare model? Y/N\n")
                 if multiflare == "n" or multiflare == "N":
                     print("Flare rejected.")
-            else:
-                (i_f, E_f) = E_flare(Fmodel, T_FLARE, LpS, LpF, R_STAR)
-                flare_energies.append(E_f / ERG)
-                flare_impulses.append(i_f)
-                flare_times.append(times[i - flare_dur])
-
+            
             while True:
                 if multiflare == "n" or multiflare == "N":
                     break
@@ -588,42 +449,37 @@ def main():
                         input("Time of{:s} highest flare:\n".format(ordstr))
                     )
 
-                Fmodel = fit_multiple_flare(Fres, nflare, tpeak, t, model=FLARE_MODEL)
+                fmodel = model_flare(fres, nflare, tpeak, twin, model=FLARE_MODEL)
 
-                Fmodel_sum = np.sum(Fmodel[2])
+                fmodel_sum = np.sum(fmodel[2])
 
                 accept = input("Accept model? Y/N\n")
                 if accept == "n" or accept == "N":
                     retry = input("Retry fit? Y/N\n")
                     continue
+                else:
+                    break
 
-                for i in range(nflare):
-                    (i_f, E_f) = E_flare(
-                        [Fmodel[0][i], Fmodel[1], Fmodel[2][i]],
-                        T_FLARE,
-                        LpS,
-                        LpF,
-                        R_STAR,
+            for i in range(nflare):
+                (i_f, E_f) = E_flare(
+                    [fmodel[0][i], fmodel[1], fmodel[2][i]],
+                    T_FLARE,
+                    LpS,
+                    LpF,
+                    R_STAR,
+                )
+                
+                output.append(
+                    "{:.6f}  {:.8e}  {:.8e}\n".format(
+                        fmodel[3][i] / DAY, E_f / ERG, i_f
                     )
-                    flare_energies.append(E_f / ERG)
-                    flare_impulses.append(i_f)
-                    flare_times.append(Fmodel[3][i] / DAY)
-
+                )
                 break
 
             flare_dur = 0
             in_flare = False
 
     # Print the flare energies to stdout
-
-    output = []
-
-    for i in range(len(flare_energies)):
-        output.append(
-            "{:.6f}  {:.8e}  {:.8e}\n".format(
-                flare_times[i], flare_energies[i], flare_impulses[i]
-            )
-        )
 
     outf = open("out/energies.out", "a")
     outf.writelines(output)
