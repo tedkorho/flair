@@ -40,13 +40,9 @@ PLOT = True
 #    - consider:
 #       some functions in a separate file
 #       slimming down the main loop
-#       deprecate old "fit X" type functions
 #       a clear place to add flare models
-#       detection of degrees of freedom etc. so that the
-#        models aren't assumed to have 3 parameters
 
 # TODO Issues to solve (then all done):
-#    - sometimes negative / weird fits (solve issue w/ bounds OR regularization OR manual peaks)
 #    - the thing where the base level comes from a polynomial fit
 #    - BIC working properly
 #    - ensure that the energy is integrated correctly: easiest done by comparing
@@ -165,10 +161,10 @@ def plot_flare_models(tdata, fres_data, tmodel, ymodel, peaktimes, f, popt, BIC,
     plt.clf()
     plt.plot(tmodel, ymodel)
     plt.legend(["BIC = {:.3f}".format(BIC)])
+    nparam = int(len(popt)/nflare)
     for i in range(nflare):
         fmodel_i = (
-            popt[3 * i]
-            * f(popt[3 * i + 1] * (tmodel - peaktimes[i] - popt[3 * i + 2]))
+            f(tmodel - peaktimes[i], *popt[nparam*i : nparam*(i+1)])
         )
         plt.plot(tmodel, fmodel_i)
     
@@ -176,7 +172,7 @@ def plot_flare_models(tdata, fres_data, tmodel, ymodel, peaktimes, f, popt, BIC,
     plt.show(block=False)
 
 
-def model_flare(fres, n, peaktimes, t, model="exp"):
+def model_flare(fres, peaktimes, t, model="exp"):
 
     """
     Returns the optimized flare according to a model, and its energy.
@@ -186,15 +182,14 @@ def model_flare(fres, n, peaktimes, t, model="exp"):
     some helper values are provided in the beginning.
     """
 
+    n = len(peaktimes)
+
     time0 = time()
     interpol = interp1d(t, fres, fill_value="extrapolate")
     x = np.arange(t[0], t[-1], 10.0)  # Unit is seconds here!
     y = interpol(x)
     initialguess = []
-    bounds = ([], [])
-    lower = [0.0, 0.0, -0.5]
-    upper = [3.0, 5.0, 0.5]
-    opt_bounds = []
+    bounds = []
 
     y_model = np.zeros(len(y))
     y_obs = np.zeros(len(t))
@@ -204,31 +199,30 @@ def model_flare(fres, n, peaktimes, t, model="exp"):
     thalf = find_thalf(x, y, maxx, maxy)  # TODO DAVENPORT
     x = (x - maxx) / thalf
     y = y / maxy
+    
+    alpha = 0.0*len(x)
 
     if model == "exp":
         f = model_exp
         f0 = lambda x, a, b, c : a * f(b * (x - c))
-        opt_bounds_single = [(0.0,3.0),(0.0,10.0)]
+        bounds_single = [(0.0,3.0),(0.0,10.0)]
+        guess_single = [1., 1., 0.]
         nargs = 3
 
     if model == "Davenport" or model == "Davenport2":
         f = model_davenport
         f0 = lambda x, a, b, c : a * f(b * (x - c))
-        opt_bounds_single = [(0.0,3.0),(0.0,5.0),(-0.5,0.5)]
+        bounds_single = [(0.0,3.0),(0.0,5.0),(-0.5,0.5)]
+        bounds_alt = ([0.0, 0.0, -0.5],[3.0,5.0, 0.5])
+        guess_single = [1., 0.5, 0.]
         nargs = 3
 
     for i in range(n):
         # Find an initial guess
-        y_i = y - y_model
-        fp = lambda tp, a, b, c: a * f(b * (tp - peaktimes[i] - c))
-        popt, pcov = curve_fit(fp, x, y_i, bounds=(lower, upper))
+        popt,pcov = curve_fit(f0, x, y-y_model, bounds = bounds_alt)
         initialguess.extend(popt)
-
-        bounds[0].extend(lower)
-        bounds[1].extend(upper)
-        opt_bounds.extend(opt_bounds_single)
-
-        # Refactor this into an own function?
+        
+        bounds.extend(bounds_single)
 
         fi = lambda tp, *args: np.sum(
             [
@@ -238,22 +232,13 @@ def model_flare(fres, n, peaktimes, t, model="exp"):
             axis=0,
         )
 
-        # Dirty one liner that sums up the flares for an i-flare model. Currently only works for
-        # a 3 parameter model f.
+        # Dirty one liner that sums up the flares for an i-flare model.
 
-        # TODO REGULARIZATION METHOD TO GET RID OF WEIRD BEHAVIOR
-        # TODO list for that:
-        #  - change curve_fit to scipy's minimization (risky?)
-        #  - define cost function that minimizes the error and severely punishes weird behavior
-        #    (negative or very large arguments a/b/c)
-
-        alpha = 0.0*len(x)
         error = lambda b : tikhonov_error(fi, x, y, b, alpha)
-        opt = minimize(error, initialguess, bounds = opt_bounds)
+        opt = minimize(error, initialguess, bounds = bounds)
 
-        #popt, pcov = curve_fit(fi, x, y, p0=initialguess, bounds=bounds)
         for j in range(len(initialguess)):
-            initialguess[j] = opt.x[j] #popt[j]
+            initialguess[j] = opt.x[j]
 
         y_model = fi(x, *opt.x)
         y_obs = fi((t - maxx)/thalf, *opt.x)*maxy
@@ -264,8 +249,7 @@ def model_flare(fres, n, peaktimes, t, model="exp"):
     
     if PLOT == True:
         tdata = (t-maxx)/thalf
-        plot_flare_models(tdata, fres/maxy, x, y_model, peaktimes, f, opt.x, BIC, n)
-# TODO make this function call a little more elegant
+        plot_flare_models(tdata, fres/maxy, x, y_model, peaktimes, f0, opt.x, BIC, n)
         
     fres_models = []
     fres_peaks = []
@@ -409,7 +393,7 @@ def main():
     t = data[:, 0]
     trend = data[:, 2]
     flarestamps = data[:, 3]
-    pdcflux_ratio = (pdcflux - trend) / trend
+    pdcflux_ratio = (pdcflux - trend) / np.nanmean(trend)
 
     in_flare = False
     flare_dur = 0
@@ -431,9 +415,9 @@ def main():
             nans = np.isnan(amps)
             fres = amps[~nans]
             twin = twin[~nans]
+            
             nflare = 1
-
-            fmodel = model_flare(fres, nflare, [0.0], twin, model=FLARE_MODEL)
+            fmodel = model_flare(fres, [0.0], twin, model=FLARE_MODEL)
 
             multiflare = "n"
             retry = "y"
@@ -467,9 +451,7 @@ def main():
                         input("Time of{:s} highest flare:\n".format(ordstr))
                     )
 
-                fmodel = model_flare(fres, nflare, tpeak, twin, model=FLARE_MODEL)
-
-                fmodel_sum = np.sum(fmodel[2])
+                fmodel = model_flare(fres, tpeak, twin, model=FLARE_MODEL)
 
                 accept = input("Accept model? Y/N\n")
                 if accept == "n" or accept == "N":
