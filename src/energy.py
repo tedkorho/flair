@@ -2,7 +2,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from scipy.interpolate import interp1d
 from scipy.integrate import simps, quad
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, minimize
 from astropy.io import fits
 import argparse as ap
 from time import time
@@ -36,7 +36,6 @@ PLOT = True
 
 # TODO REFACTORING:
 #    - more uniform variable naming! (go through this w/ notebook)
-#    - single and multiple flare models w/ same function
 #    - find & minimize hardcoded constants 
 #    - consider:
 #       some functions in a separate file
@@ -93,10 +92,6 @@ def find_thalf(x, y, maxx, maxy):
     return thalf
 
 
-def zero(ts):
-    return np.zeros(len(ts))
-
-
 def model_double_exp(t, A1, A2, k1, k2):
     """
     Models the tail of a flare that starts from t0, has a peak A, and decays like
@@ -119,8 +114,7 @@ def model_quart_poly_fix(t, A, a1, a3, a4):
     and behaves like a quartic polynomial. Is also fixed to have derivative and value zero at
     x = -1
     """
-    a2 = -a4 + a3 + a1 - A  # 2*a3 - 3*a4 + A
-    # a1 = (4*a4 - 3*a3 + 2*a2)
+    a2 = -a4 + a3 + a1 - A
     y = a1 * t + a2 * t ** 2 + a3 * t ** 3 + a4 * t ** 4 + A
     return y
 
@@ -149,9 +143,23 @@ def model_davenport(t):
     return y
 
 
+def tikhonov_error(f, x, y, params, alpha):
+    """
+    Returns a Tikhonov style error. ||f(x, *params) - y|| + alpha||params||
+    x, y are 1D arrays of the same dimension n.
+    params is an arbitrary length array.
+    f is a function such that f(x, *params) returns an 1D array of dimension n.
+    alpha is a scalar
+    """
+
+    return np.linalg.norm(f(x, *params) - y) + alpha*np.linalg.norm(params)
+
+
+
+
 def plot_flare_models(tdata, fres_data, tmodel, ymodel, peaktimes, f, popt, BIC, nflare):
     """
-    Takes in data points, 
+    Plots flares
     """
 
     plt.clf()
@@ -159,15 +167,13 @@ def plot_flare_models(tdata, fres_data, tmodel, ymodel, peaktimes, f, popt, BIC,
     plt.legend(["BIC = {:.3f}".format(BIC)])
     for i in range(nflare):
         fmodel_i = (
-            popt[2 * i]
-            * f(popt[2 * i + 1] * (tmodel - peaktimes[i] - popt[2 * i + 2]))
+            popt[3 * i]
+            * f(popt[3 * i + 1] * (tmodel - peaktimes[i] - popt[3 * i + 2]))
         )
         plt.plot(tmodel, fmodel_i)
     
     plt.plot(tdata, fres_data, "ro")
     plt.show(block=False)
-
-
 
 
 def model_flare(fres, n, peaktimes, t, model="exp"):
@@ -188,6 +194,7 @@ def model_flare(fres, n, peaktimes, t, model="exp"):
     bounds = ([], [])
     lower = [0.0, 0.0, -0.5]
     upper = [3.0, 5.0, 0.5]
+    opt_bounds = []
 
     y_model = np.zeros(len(y))
     y_obs = np.zeros(len(t))
@@ -200,9 +207,15 @@ def model_flare(fres, n, peaktimes, t, model="exp"):
 
     if model == "exp":
         f = model_exp
+        f0 = lambda x, a, b, c : a * f(b * (x - c))
+        opt_bounds_single = [(0.0,3.0),(0.0,10.0)]
+        nargs = 3
 
     if model == "Davenport" or model == "Davenport2":
         f = model_davenport
+        f0 = lambda x, a, b, c : a * f(b * (x - c))
+        opt_bounds_single = [(0.0,3.0),(0.0,5.0),(-0.5,0.5)]
+        nargs = 3
 
     for i in range(n):
         # Find an initial guess
@@ -213,12 +226,13 @@ def model_flare(fres, n, peaktimes, t, model="exp"):
 
         bounds[0].extend(lower)
         bounds[1].extend(upper)
-        
+        opt_bounds.extend(opt_bounds_single)
+
         # Refactor this into an own function?
 
         fi = lambda tp, *args: np.sum(
             [
-                args[2 * j] * f(args[2 * j + 1] * (tp - peaktimes[j] - args[2 * j + 2]))
+                f0(tp - peaktimes[j], *args[nargs*j : nargs*(j+1)])
                 for j in range(i + 1)
             ],
             axis=0,
@@ -233,12 +247,16 @@ def model_flare(fres, n, peaktimes, t, model="exp"):
         #  - define cost function that minimizes the error and severely punishes weird behavior
         #    (negative or very large arguments a/b/c)
 
-        popt, pcov = curve_fit(fi, x, y, p0=initialguess, bounds=bounds)
-        for j in range(len(initialguess)):
-            initialguess[j] = popt[j]
+        alpha = 0.0*len(x)
+        error = lambda b : tikhonov_error(fi, x, y, b, alpha)
+        opt = minimize(error, initialguess, bounds = opt_bounds)
 
-        y_model = fi(x, *popt)
-        y_obs = fi((t - maxx)/thalf, *popt)*maxy
+        #popt, pcov = curve_fit(fi, x, y, p0=initialguess, bounds=bounds)
+        for j in range(len(initialguess)):
+            initialguess[j] = opt.x[j] #popt[j]
+
+        y_model = fi(x, *opt.x)
+        y_obs = fi((t - maxx)/thalf, *opt.x)*maxy
 
     times = x * thalf + maxx
 
@@ -246,7 +264,7 @@ def model_flare(fres, n, peaktimes, t, model="exp"):
     
     if PLOT == True:
         tdata = (t-maxx)/thalf
-        plot_flare_models(tdata, fres/maxy, x, y_model, peaktimes, f, popt, BIC, n)
+        plot_flare_models(tdata, fres/maxy, x, y_model, peaktimes, f, opt.x, BIC, n)
 # TODO make this function call a little more elegant
         
     fres_models = []
@@ -255,8 +273,8 @@ def model_flare(fres, n, peaktimes, t, model="exp"):
 
     for i in range(n):
         fres_models.append(
-            popt[2 * i]
-            * f(popt[2 * i + 1] * (x - peaktimes[i] - popt[2 * i + 2]))
+            opt.x[3 * i]
+            * f(opt.x[3 * i + 1] * (x - peaktimes[i] - opt.x[3 * i + 2]))
             * maxy
         )
         fres_peaks.append(np.max(fres_models[i]))
