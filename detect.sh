@@ -9,10 +9,10 @@ for f in $(find input -name "*_lc.fits")
 do
     echo "$basename $f"
     bn="$(basename -s .fits $f)"
-	python3 src/lightcurve_analysis.py "$f" > "$flareout"
-	python3 src/trend_iteration.py "$flareout" > "$flareout2"
+	python3 src/candidates.py "$f" > "$flareout"
+	python3 src/iteration.py "$flareout" > "$flareout2"
 	echo "$lc_preamble" > "$flareout3"
-    python3 src/trend_iteration.py "$flareout2" --plot "out/$bn.png" >> "$flareout3"
+    python3 src/iteration.py "$flareout2" --plot "out/$bn.png" >> "$flareout3"
 	cp "$flareout3" "out/$bn.dat"
     rm "$flareout"
 	rm "$flareout2"
