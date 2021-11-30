@@ -1,8 +1,10 @@
 import numpy as np
+from numpy.polynomial import Polynomial
 from matplotlib import pyplot as plt
 from scipy.interpolate import interp1d
 from scipy.integrate import simps, quad
 from scipy.optimize import curve_fit, minimize
+from sklearn import svm
 from astropy.io import fits
 import argparse as ap
 from time import time
@@ -39,22 +41,52 @@ PLOT = True
 #    - find & minimize hardcoded constants 
 #    - consider:
 #       some functions in a separate file
-#       slimming down the main loop
 #       a clear place to add flare models
 
 # TODO Issues to solve (then all done):
-#    - the thing where the base level comes from a polynomial fit
-#    - BIC working properly
+#    - the thing where the base level comes from a polynomial fit - BASICALLY DONE
+#    - BIC working properly - MOSTLY DONE
 #    - ensure that the energy is integrated correctly: easiest done by comparing
-#       to the AB Dor paper
+#       to the AB Dor paper - MOSTLY DONE
 
-def sqerr(data, model):
+def svr_trend(t, fres):
+    """
+    Fits a SVR model for the time before & after the flare; works as a reference level.
+    """
+    
+    pre = int(FLARE_PAD_1/2)
+    post = int(FLARE_PAD_2/2)
+
+    tfit = np.zeros(pre+post)
+    tfit[:pre] = t[:pre]
+    tfit[-post:] = t[-post:]
+    ffit = np.zeros(pre+post)
+    ffit[:pre] = fres[:pre]
+    ffit[-post:] = fres[-post:]
+    meant = np.mean(tfit)
+    stdt = np.std(tfit)
+    meanf = np.mean(ffit)
+    stdf = np.std(ffit)
+
+    wt = np.array([[(tp - meant) / stdt] for tp in tfit])  # normalization for optimal SVM
+    clf = svm.SVR(kernel="rbf", gamma="auto")
+    try:
+        clf.fit(wt, (ffit - meanf) / stdf)
+    except ValueError:
+        return np.array([])
+
+    flux_pred = clf.predict(np.array([[(tp - meant)/stdt] for tp in t]))
+
+    return flux_pred * stdf + meanf
+
+
+def mse(data, model):
     """
     Is supposed to return the chi-squared (or similar) value indicating
     the error in the model
     """
 
-    return np.sum((data - model) ** 2)/np.var(data)
+    return np.sum((data - model) ** 2)/len(data)
 
 
 def model_exp(t, A, b):
@@ -212,7 +244,7 @@ def model_flare(fres, peaktimes, t, model="exp"):
     if model == "Davenport" or model == "Davenport2":
         f = model_davenport
         f0 = lambda x, a, b, c : a * f(b * (x - c))
-        bounds_single = [(0.0,3.0),(0.0,5.0),(-0.5,0.5)]
+        bounds_single = [(0.0,3.0),(0.0,5.0),(-0.2,0.2)]
         bounds_alt = ([0.0, 0.0, -0.5],[3.0,5.0, 0.5])
         guess_single = [1., 0.5, 0.]
         nargs = 3
@@ -245,7 +277,7 @@ def model_flare(fres, peaktimes, t, model="exp"):
 
     times = x * thalf + maxx
 
-    BIC = sqerr(fres, y_obs)/(len(t) - 3*n) + 3.*n*np.log(len(t))
+    BIC = 2*np.log(mse(fres/maxy, y_obs/maxy))*len(fres) + nargs*n*np.log(len(fres))
     
     if PLOT == True:
         tdata = (t-maxx)/thalf
@@ -261,7 +293,7 @@ def model_flare(fres, peaktimes, t, model="exp"):
             * f(opt.x[3 * i + 1] * (x - peaktimes[i] - opt.x[3 * i + 2]))
             * maxy
         )
-        fres_peaks.append(np.max(fres_models[i]))
+        fres_peaks.append(np.max(fres_models[i])*maxy)
         t_peaks.append(times[np.argmax(fres_models[i])])
 
     return (fres_peaks, times, fres_models, t_peaks)
@@ -282,7 +314,6 @@ def response_TESS():
     return f
 
 
-R_tess = response_TESS()
 
 
 def B(lambd, T):
@@ -373,6 +404,131 @@ def E_flare(Fmodel, T_flare, LpS, LpF, R_star):
 
     return (impulsiveness, energy)
 
+def input_int(prompt):
+    """
+    Prompts an integer from the user w/ error handling.
+    """
+    i = 0
+    while(true):
+        try:
+            i = int(input(prompt))
+            break
+            
+        except ValueError:
+            print("Invalid input. Try again.")
+            continue
+    return i
+    
+def input_float(prompt):
+    """
+    Prompts a float from the user w/ error handling.
+    """
+    f = 0.
+    while(true):
+        try:
+            f = float(input(prompt))
+            break
+            
+        except ValueError:
+            print("Invalid input. Try again.")
+            continue
+    return f
+
+def input_bool(prompt):
+    """
+    Prompts a yes/no from the user w/ error handling.
+    """
+    answer = ""
+    while(true):
+        try:
+            answer = input(prompt)
+            break
+            
+        except ValueError:
+            print("Invalid input. Try again.")
+            continue
+    
+    if (answer == "N" or answer == "n"):
+        return False
+    else:
+        return True
+
+
+def process_candidate(t, flux):
+    """
+    Function to process a flare candidate.
+    """
+    fres = flux - svr_trend(t, flux)
+
+    nflare = 1
+    fmodel = model_flare(fres, [0.0], t, model=FLARE_MODEL)
+
+    multiflare = "n"
+    retry = "y"
+
+    accept = input("Accept model? Y/N\n")
+
+    if accept == "N" or accept == "n":
+        multiflare = input("Multiple flare model? Y/N\n") #TODO input functions instead of try/except
+        if multiflare == "n" or multiflare == "N":
+            print("Flare rejected.")
+    
+    while True:
+        if multiflare == "n" or multiflare == "N":
+            break
+        if retry == "n" or retry == "N":
+            break
+        
+        try:
+            nflare = int(input("Number of flares:\n"))
+        except ValueError:
+            continue
+
+        tpeak = np.zeros(nflare)
+        for i in range(nflare):
+            ordstr = ""
+            if i == 1:
+                ordstr = " 2nd"
+            elif i == 2:
+                ordstr = " 3rd"
+            elif i > 2:
+                ordstr = "{:d}st".format(i)
+
+            tpeak[i] = float(
+                input("Time of{:s} highest flare:\n".format(ordstr))
+            )
+
+        fmodel = model_flare(fres, tpeak, t, model=FLARE_MODEL)
+
+        accept = input("Accept model? Y/N\n")
+        if accept == "n" or accept == "N":
+            retry = input("Retry fit? Y/N\n")
+            continue
+        else:
+            break
+    
+    ret = []
+
+    for i in range(nflare):
+        (i_f, E_f) = E_flare(
+            [fmodel[0][i], fmodel[1], fmodel[2][i]/np.nanmean(flux)],
+            T_FLARE,
+            LpS,
+            LpF,
+            R_STAR,
+        )
+        
+        ret.append(
+            "{:.6f}  {:.8e}  {:.8e}\n".format(
+                fmodel[3][i] / DAY, E_f / ERG, i_f
+            )
+        )
+
+    return ret
+    
+R_tess = response_TESS()
+LpS = Lp_STAR(R_STAR, T_STAR, R_tess)
+LpF = Lp_flare_density(T_FLARE, R_tess)
 
 def main():
 
@@ -383,23 +539,25 @@ def main():
     parser.add_argument("starinfo", type=str, help="")
     args = parser.parse_args()
 
-    LpS = Lp_STAR(R_STAR, T_STAR, R_tess)
-    LpF = Lp_flare_density(T_FLARE, R_tess)
-
     # Load the lightcurve with flagged flare times
 
     data = np.loadtxt(args.inputfile)
-    pdcflux = data[:, 1]
+    flux = data[:, 1]
     t = data[:, 0]
     trend = data[:, 2]
     flarestamps = data[:, 3]
-    pdcflux_ratio = (pdcflux - trend) / np.nanmean(trend)
+    
+    nans = np.isnan(flux)
+    flux = flux[~nans]
+    t = t[~nans]
+    trend = trend[~nans]
+    flarestamps = flarestamps[~nans]
 
     in_flare = False
     flare_dur = 0
     output = []
 
-    for i in range(len(pdcflux)):
+    for i in range(len(flux)):
         if np.isnan(trend[i]):
             if in_flare:
                 flare_dur += 1
@@ -410,72 +568,10 @@ def main():
             flare_dur += 1
 
         elif in_flare:
-            amps = pdcflux_ratio[i - flare_dur - FLARE_PAD_1 : i + FLARE_PAD_2]
-            twin = t[i - flare_dur - FLARE_PAD_1 : i + FLARE_PAD_2] * DAY
-            nans = np.isnan(amps)
-            fres = amps[~nans]
-            twin = twin[~nans]
-            
-            nflare = 1
-            fmodel = model_flare(fres, [0.0], twin, model=FLARE_MODEL)
-
-            multiflare = "n"
-            retry = "y"
-
-            accept = input("Accept model? Y/N\n")
-
-            if accept == "N" or accept == "n":
-                multiflare = input("Multiple flare model? Y/N\n")
-                if multiflare == "n" or multiflare == "N":
-                    print("Flare rejected.")
-            
-            while True:
-                if multiflare == "n" or multiflare == "N":
-                    break
-                if retry == "n" or retry == "N":
-                    break
-
-                nflare = int(input("Number of flares:\n"))
-
-                tpeak = np.zeros(nflare)
-                for i in range(nflare):
-                    ordstr = ""
-                    if i == 1:
-                        ordstr = " 2nd"
-                    elif i == 2:
-                        ordstr = " 3rd"
-                    elif i > 2:
-                        ordstr = "{:d}st".format(i)
-
-                    tpeak[i] = float(
-                        input("Time of{:s} highest flare:\n".format(ordstr))
-                    )
-
-                fmodel = model_flare(fres, tpeak, twin, model=FLARE_MODEL)
-
-                accept = input("Accept model? Y/N\n")
-                if accept == "n" or accept == "N":
-                    retry = input("Retry fit? Y/N\n")
-                    continue
-                else:
-                    break
-
-            for i in range(nflare):
-                (i_f, E_f) = E_flare(
-                    [fmodel[0][i], fmodel[1], fmodel[2][i]],
-                    T_FLARE,
-                    LpS,
-                    LpF,
-                    R_STAR,
-                )
-                
-                output.append(
-                    "{:.6f}  {:.8e}  {:.8e}\n".format(
-                        fmodel[3][i] / DAY, E_f / ERG, i_f
-                    )
-                )
-                break
-
+            win = np.s_[i - flare_dur - FLARE_PAD_1 : i + FLARE_PAD_2]
+            twin = t[win] * DAY
+            fwin = flux[win]
+            output.extend(process_candidate(twin, fwin))
             flare_dur = 0
             in_flare = False
 
