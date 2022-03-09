@@ -35,6 +35,8 @@ elif FM_NUM == 3:
 FLARE_PAD_1 = int(params[13])
 FLARE_PAD_2 = int(params[14])
 PLOT = True
+PLOT_NUM = 0
+LIGHTCURVE = ""
 
 # TODO REFACTORING:
 #    - more uniform variable naming! (go through this w/ notebook)
@@ -44,8 +46,6 @@ PLOT = True
 #       a clear place to add flare models
 
 # TODO Issues to solve (then all done):
-#    - the thing where the base level comes from a polynomial fit - BASICALLY DONE
-#    - BIC working properly - MOSTLY DONE
 #    - ensure that the energy is integrated correctly: easiest done by comparing
 #       to the AB Dor paper - MOSTLY DONE
 
@@ -187,20 +187,27 @@ def tikhonov_error(f, x, y, params, alpha):
 
 def plot_flare_models(tdata, fres_data, tmodel, ymodel, peaktimes, f, popt, BIC, nflare):
     """
-    Plots flares
+    Plots flares from model
     """
-
+    global PLOT_NUM
+    
     plt.clf()
-    plt.plot(tmodel, ymodel)
-    plt.legend(["BIC = {:.3f}".format(BIC)])
+    plt.title("Flare model")
+    plt.plot(tmodel, ymodel, "k")
+    plt.legend(["Total model. BIC = {:.3f}".format(BIC)])
     nparam = int(len(popt)/nflare)
+    
     for i in range(nflare):
         fmodel_i = (
             f(tmodel - peaktimes[i], *popt[nparam*i : nparam*(i+1)])
         )
-        plt.plot(tmodel, fmodel_i)
+        plt.plot(tmodel, fmodel_i, "--")
     
-    plt.plot(tdata, fres_data, "ro")
+    plt.ylabel(r"Flux residual ($F_{max}$)")
+    plt.xlabel(r"Time ($t_{1/2}$)")
+    plt.plot(tdata, fres_data, "kx")
+    plt.savefig("out/plots/{:s}_event_{:s}.png".format(LIGHTCURVE, PLOT_NUM))
+    PLOT_NUM += 1
     plt.show(block=False)
 
 
@@ -541,6 +548,7 @@ def main():
 
     # Load the lightcurve with flagged flare times
 
+    LIGHTCURVE = args.inputfile[:-4]
     data = np.loadtxt(args.inputfile)
     flux = data[:, 1]
     t = data[:, 0]

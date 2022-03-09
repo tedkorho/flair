@@ -153,7 +153,8 @@ pdcflux = lcdata[:, 1]
 
 # also prepare for the case where the input data does not have flare stamps
 
-if len(lcdata[0] > 3):
+
+if len(lcdata[0]) > 3:
     flares0 = lcdata[:, 3]
 else:
     flares0 = np.zeros(len(pdcflux))
