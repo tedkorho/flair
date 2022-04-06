@@ -25,7 +25,7 @@ def detrended_curve(time, flux):
     requires the line "from sklearn import svm"
     """
 
-    if len(time) == 0:
+    if len(time) < 5:
         return []
 
     meant = np.mean(time)

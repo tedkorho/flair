@@ -1,3 +1,4 @@
+from tkinter import W
 import numpy as np
 from numpy.polynomial import Polynomial
 from matplotlib import pyplot as plt
@@ -206,7 +207,7 @@ def plot_flare_models(tdata, fres_data, tmodel, ymodel, peaktimes, f, popt, BIC,
     plt.ylabel(r"Flux residual ($F_{max}$)")
     plt.xlabel(r"Time ($t_{1/2}$)")
     plt.plot(tdata, fres_data, "kx")
-    plt.savefig("out/plots/{:s}_event_{:s}.png".format(LIGHTCURVE, PLOT_NUM))
+    plt.savefig("out/plots/{:s}_event_{}.png".format(LIGHTCURVE, PLOT_NUM))
     PLOT_NUM += 1
     plt.show(block=False)
 
@@ -223,7 +224,6 @@ def model_flare(fres, peaktimes, t, model="exp"):
 
     n = len(peaktimes)
 
-    time0 = time()
     interpol = interp1d(t, fres, fill_value="extrapolate")
     x = np.arange(t[0], t[-1], 10.0)  # Unit is seconds here!
     y = interpol(x)
@@ -245,7 +245,6 @@ def model_flare(fres, peaktimes, t, model="exp"):
         f = model_exp
         f0 = lambda x, a, b, c : a * f(b * (x - c))
         bounds_single = [(0.0,3.0),(0.0,10.0)]
-        guess_single = [1., 1., 0.]
         nargs = 3
 
     if model == "Davenport" or model == "Davenport2":
@@ -253,15 +252,17 @@ def model_flare(fres, peaktimes, t, model="exp"):
         f0 = lambda x, a, b, c : a * f(b * (x - c))
         bounds_single = [(0.0,3.0),(0.0,5.0),(-0.2,0.2)]
         bounds_alt = ([0.0, 0.0, -0.5],[3.0,5.0, 0.5])
-        guess_single = [1., 0.5, 0.]
         nargs = 3
 
     for i in range(n):
+        
         # Find an initial guess
+
         popt,pcov = curve_fit(f0, x, y-y_model, bounds = bounds_alt)
         initialguess.extend(popt)
-        
         bounds.extend(bounds_single)
+
+        # Dirty one liner that sums up the flares for an i-flare model.
 
         fi = lambda tp, *args: np.sum(
             [
@@ -271,7 +272,7 @@ def model_flare(fres, peaktimes, t, model="exp"):
             axis=0,
         )
 
-        # Dirty one liner that sums up the flares for an i-flare model.
+        # Optimize
 
         error = lambda b : tikhonov_error(fi, x, y, b, alpha)
         opt = minimize(error, initialguess, bounds = bounds)
@@ -296,8 +297,8 @@ def model_flare(fres, peaktimes, t, model="exp"):
 
     for i in range(n):
         fres_models.append(
-            opt.x[3 * i]
-            * f(opt.x[3 * i + 1] * (x - peaktimes[i] - opt.x[3 * i + 2]))
+            opt.x[nargs * i]
+            * f(opt.x[nargs * i + 1] * (x - peaktimes[i] - opt.x[nargs * i + 2]))
             * maxy
         )
         fres_peaks.append(np.max(fres_models[i])*maxy)
@@ -548,7 +549,8 @@ def main():
 
     # Load the lightcurve with flagged flare times
 
-    LIGHTCURVE = args.inputfile[:-4]
+    global LIGHTCURVE
+    LIGHTCURVE = args.inputfile[4:-4]
     data = np.loadtxt(args.inputfile)
     flux = data[:, 1]
     t = data[:, 0]
