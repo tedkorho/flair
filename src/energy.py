@@ -1,9 +1,10 @@
 from tkinter import W
+import os
 import numpy as np
 from numpy.polynomial import Polynomial
 from matplotlib import pyplot as plt
 from scipy.interpolate import interp1d
-from scipy.integrate import simps, quad
+from scipy.integrate import simps, trapezoid
 from scipy.optimize import curve_fit, minimize
 from sklearn import svm
 from astropy.io import fits
@@ -208,7 +209,6 @@ def plot_flare_models(tdata, fres_data, tmodel, ymodel, peaktimes, f, popt, BIC,
     plt.xlabel(r"Time ($t_{1/2}$)")
     plt.plot(tdata, fres_data, "kx")
     plt.savefig("out/plots/{:s}_event_{}.png".format(LIGHTCURVE, PLOT_NUM))
-    PLOT_NUM += 1
     plt.show(block=False)
 
 
@@ -233,9 +233,11 @@ def model_flare(fres, peaktimes, t, model="exp"):
     y_model = np.zeros(len(y))
     y_obs = np.zeros(len(t))
 
+    # Scale x, y
+
     maxx = x[np.argmax(np.abs(y))]
     maxy = np.max(y)
-    thalf = find_thalf(x, y, maxx, maxy)  # TODO DAVENPORT
+    thalf = find_thalf(x, y, maxx, maxy) 
     x = (x - maxx) / thalf
     y = y / maxy
     
@@ -255,14 +257,11 @@ def model_flare(fres, peaktimes, t, model="exp"):
         nargs = 3
 
     for i in range(n):
-        
         # Find an initial guess
-
         popt,pcov = curve_fit(f0, x, y-y_model, bounds = bounds_alt)
         initialguess.extend(popt)
+        
         bounds.extend(bounds_single)
-
-        # Dirty one liner that sums up the flares for an i-flare model.
 
         fi = lambda tp, *args: np.sum(
             [
@@ -272,7 +271,7 @@ def model_flare(fres, peaktimes, t, model="exp"):
             axis=0,
         )
 
-        # Optimize
+        # Dirty one liner that sums up the flares for an i-flare model.
 
         error = lambda b : tikhonov_error(fi, x, y, b, alpha)
         opt = minimize(error, initialguess, bounds = bounds)
@@ -294,17 +293,23 @@ def model_flare(fres, peaktimes, t, model="exp"):
     fres_models = []
     fres_peaks = []
     t_peaks = []
+    fns = []
 
     for i in range(n):
         fres_models.append(
-            opt.x[nargs * i]
-            * f(opt.x[nargs * i + 1] * (x - peaktimes[i] - opt.x[nargs * i + 2]))
+            opt.x[3 * i]
+            * f(opt.x[3 * i + 1] * (x - peaktimes[i] - opt.x[3 * i + 2]))
             * maxy
         )
         fres_peaks.append(np.max(fres_models[i])*maxy)
         t_peaks.append(times[np.argmax(fres_models[i])])
 
-    return (fres_peaks, times, fres_models, t_peaks)
+        fns.append(lambda tp : opt.x[3 * i]
+            * f(opt.x[3 * i + 1] * tp / thalf)
+            * maxy
+        )
+
+    return (fres_peaks, times, fns, t_peaks)
 
 
 
@@ -404,12 +409,13 @@ def E_flare(Fmodel, T_flare, LpS, LpF, R_star):
 
     # Fmodel is a tuple; [0] is the maximum,
     # [1] is the interpolated times,
-    # [2] is the modelled flare as an array.
+    # [2] is the modelled flare as a function
 
     impulsiveness = Fmodel[0] / 2
-    lumin = L_f(Fmodel[2])
-    energy = simps(lumin, Fmodel[1])
-
+    
+    t = np.linspace(-1000.,3000.,4000)
+    fn = Fmodel[2](t)
+    energy = trapezoid(L_f(fn), t)
     return (impulsiveness, energy)
 
 def input_int(prompt):
@@ -466,6 +472,9 @@ def process_candidate(t, flux):
     """
     Function to process a flare candidate.
     """
+
+    global PLOT_NUM
+
     fres = flux - svr_trend(t, flux)
 
     nflare = 1
@@ -479,12 +488,16 @@ def process_candidate(t, flux):
     if accept == "N" or accept == "n":
         multiflare = input("Multiple flare model? Y/N\n") #TODO input functions instead of try/except
         if multiflare == "n" or multiflare == "N":
+            os.remove(os.path.join("out/plots","{:s}_event_{}.png".format(LIGHTCURVE, PLOT_NUM)))
             print("Flare rejected.")
     
     while True:
         if multiflare == "n" or multiflare == "N":
+            PLOT_NUM += 1
             break
         if retry == "n" or retry == "N":
+            os.remove(os.path.join("out/plots","{:s}_event_{}.png".format(LIGHTCURVE, PLOT_NUM)))
+            print("Flare rejected.")
             break
         
         try:
@@ -513,13 +526,15 @@ def process_candidate(t, flux):
             retry = input("Retry fit? Y/N\n")
             continue
         else:
+            PLOT_NUM += 1
             break
     
     ret = []
 
     for i in range(nflare):
+
         (i_f, E_f) = E_flare(
-            [fmodel[0][i], fmodel[1], fmodel[2][i]/np.nanmean(flux)],
+            [fmodel[0][i], fmodel[1], lambda tp : fmodel[2][i](tp) / np.nanmean(flux)],
             T_FLARE,
             LpS,
             LpF,
